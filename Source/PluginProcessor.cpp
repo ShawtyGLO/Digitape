@@ -62,6 +62,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         juce::ParameterID { "mono", 1 }, "Mono", false));
 
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "driftShape", 1 }, "Derive forme",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
     return { params.begin(), params.end() };
 }
 
@@ -150,6 +156,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     driftRateSmoothed.reset (sampleRate, smoothTime);
     driftDepthSmoothed.reset (sampleRate, smoothTime);
     widthSmoothed.reset (sampleRate, smoothTime);
+    driftShapeSmoothed.reset (sampleRate, smoothTime);
 
     timeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("time"));
     feedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("feedback"));
@@ -157,6 +164,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     driftRateSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftRate"));
     driftDepthSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftDepth"));
     widthSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("width"));
+    driftShapeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftShape"));
 
     driftPhase = 0.0f;
 }
@@ -213,6 +221,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // la sortie apres coup, donc rien a annuler et Largeur garde sa position propre.
     const bool monoEngaged = *apvts.getRawParameterValue ("mono") > 0.5f;
     widthSmoothed.setTargetValue (monoEngaged ? 0.0f : *apvts.getRawParameterValue ("width"));
+    driftShapeSmoothed.setTargetValue (*apvts.getRawParameterValue ("driftShape"));
 
     // Moteur temps : ligne a retard modulee par la Derive, avec reinjection et mix.
     // La derive fait osciller le temps de lecture autour de la valeur cible : c'est
@@ -220,6 +229,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // Largeur decorrele les phases gauche/droite (dephasage jusqu'a l'opposition totale
     // a 0.5 cycle) : une vraie bande n'a qu'un seul defilement, donc au repos (Largeur=0
     // ou Mono actif) les deux canaux restent parfaitement synchrones.
+    // Derive forme : melange entre glissement lisse (sinus) et pitch a paliers (phase
+    // quantifiee sur quelques crans, facon AMS DMX/Publison) - les deux pales du meme
+    // mouvement plutot que deux mecanismes separes.
+    constexpr int driftSteps = 6;
+
     for (int n = 0; n < numSamples; ++n)
     {
         const float timeMs      = timeSmoothed.getNextValue();
@@ -228,6 +242,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float rateHz      = driftRateSmoothed.getNextValue();
         const float depthAmt    = driftDepthSmoothed.getNextValue();
         const float widthAmt    = widthSmoothed.getNextValue();
+        const float shapeAmt    = driftShapeSmoothed.getNextValue();
 
         driftPhase += rateHz / (float) currentSampleRate;
         if (driftPhase >= 1.0f)
@@ -237,8 +252,16 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         if (driftPhaseR >= 1.0f)
             driftPhaseR -= 1.0f;
 
-        const float lfoL = std::sin (driftPhase  * juce::MathConstants<float>::twoPi);
-        const float lfoR = std::sin (driftPhaseR * juce::MathConstants<float>::twoPi);
+        const float quantPhaseL = std::floor (driftPhase  * driftSteps) / (float) driftSteps;
+        const float quantPhaseR = std::floor (driftPhaseR * driftSteps) / (float) driftSteps;
+
+        const float lfoSmoothL  = std::sin (driftPhase   * juce::MathConstants<float>::twoPi);
+        const float lfoSmoothR  = std::sin (driftPhaseR  * juce::MathConstants<float>::twoPi);
+        const float lfoSteppedL = std::sin (quantPhaseL  * juce::MathConstants<float>::twoPi);
+        const float lfoSteppedR = std::sin (quantPhaseR  * juce::MathConstants<float>::twoPi);
+
+        const float lfoL = lfoSmoothL * (1.0f - shapeAmt) + lfoSteppedL * shapeAmt;
+        const float lfoR = lfoSmoothR * (1.0f - shapeAmt) + lfoSteppedR * shapeAmt;
 
         const float modDepthMs = depthAmt * timeMs * 0.2f;
         const float delaySamplesL = juce::jmax (0.1f, timeMs + lfoL * modDepthMs) * 0.001f * (float) currentSampleRate;
