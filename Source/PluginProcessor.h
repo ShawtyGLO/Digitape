@@ -44,6 +44,7 @@ private:
 
     double currentSampleRate { 44100.0 };
     float driftPhase { 0.0f };
+    float steppedGlideL { 0.0f }, steppedGlideR { 0.0f };
 
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLine { 192000 };
 

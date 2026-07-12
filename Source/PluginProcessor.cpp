@@ -167,6 +167,8 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     driftShapeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftShape"));
 
     driftPhase = 0.0f;
+    steppedGlideL = 0.0f;
+    steppedGlideR = 0.0f;
 }
 
 void DigitapeAudioProcessor::releaseResources()
@@ -252,16 +254,25 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         if (driftPhaseR >= 1.0f)
             driftPhaseR -= 1.0f;
 
+        const float lfoSmoothL = std::sin (driftPhase  * juce::MathConstants<float>::twoPi);
+        const float lfoSmoothR = std::sin (driftPhaseR * juce::MathConstants<float>::twoPi);
+
+        // Cible a paliers : la valeur vers laquelle on glisse, jamais utilisee brute -
+        // sinon le temps de delay saute d'un coup et ca clique au lieu de faire un palier.
         const float quantPhaseL = std::floor (driftPhase  * driftSteps) / (float) driftSteps;
         const float quantPhaseR = std::floor (driftPhaseR * driftSteps) / (float) driftSteps;
+        const float targetSteppedL = std::sin (quantPhaseL * juce::MathConstants<float>::twoPi);
+        const float targetSteppedR = std::sin (quantPhaseR * juce::MathConstants<float>::twoPi);
 
-        const float lfoSmoothL  = std::sin (driftPhase   * juce::MathConstants<float>::twoPi);
-        const float lfoSmoothR  = std::sin (driftPhaseR  * juce::MathConstants<float>::twoPi);
-        const float lfoSteppedL = std::sin (quantPhaseL  * juce::MathConstants<float>::twoPi);
-        const float lfoSteppedR = std::sin (quantPhaseR  * juce::MathConstants<float>::twoPi);
+        const float stepDurationSamples = (float) currentSampleRate / juce::jmax (rateHz * (float) driftSteps, 0.001f);
+        const float glideTimeSamples = juce::jmax (1.0f, stepDurationSamples * 0.15f);
+        const float glideCoeff = 1.0f - std::exp (-1.0f / glideTimeSamples);
 
-        const float lfoL = lfoSmoothL * (1.0f - shapeAmt) + lfoSteppedL * shapeAmt;
-        const float lfoR = lfoSmoothR * (1.0f - shapeAmt) + lfoSteppedR * shapeAmt;
+        steppedGlideL += (targetSteppedL - steppedGlideL) * glideCoeff;
+        steppedGlideR += (targetSteppedR - steppedGlideR) * glideCoeff;
+
+        const float lfoL = lfoSmoothL * (1.0f - shapeAmt) + steppedGlideL * shapeAmt;
+        const float lfoR = lfoSmoothR * (1.0f - shapeAmt) + steppedGlideR * shapeAmt;
 
         const float modDepthMs = depthAmt * timeMs * 0.2f;
         const float delaySamplesL = juce::jmax (0.1f, timeMs + lfoL * modDepthMs) * 0.001f * (float) currentSampleRate;
