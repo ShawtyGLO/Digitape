@@ -53,6 +53,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "width", 1 }, "Largeur",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "mono", 1 }, "Mono", false));
+
     return { params.begin(), params.end() };
 }
 
@@ -140,12 +149,14 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     mixSmoothed.reset (sampleRate, smoothTime);
     driftRateSmoothed.reset (sampleRate, smoothTime);
     driftDepthSmoothed.reset (sampleRate, smoothTime);
+    widthSmoothed.reset (sampleRate, smoothTime);
 
     timeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("time"));
     feedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("feedback"));
     mixSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("mix"));
     driftRateSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftRate"));
     driftDepthSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftDepth"));
+    widthSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("width"));
 
     driftPhase = 0.0f;
 }
@@ -198,9 +209,17 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     driftRateSmoothed.setTargetValue  (*apvts.getRawParameterValue ("driftRate"));
     driftDepthSmoothed.setTargetValue (*apvts.getRawParameterValue ("driftDepth"));
 
+    // Mono verrouille en amont : il annule l'effet de Largeur plutot que de sommer
+    // la sortie apres coup, donc rien a annuler et Largeur garde sa position propre.
+    const bool monoEngaged = *apvts.getRawParameterValue ("mono") > 0.5f;
+    widthSmoothed.setTargetValue (monoEngaged ? 0.0f : *apvts.getRawParameterValue ("width"));
+
     // Moteur temps : ligne a retard modulee par la Derive, avec reinjection et mix.
     // La derive fait osciller le temps de lecture autour de la valeur cible : c'est
     // ce mouvement lui-meme qui produit le wow/flutter, pas un effet ajoute a part.
+    // Largeur decorrele les phases gauche/droite (dephasage jusqu'a l'opposition totale
+    // a 0.5 cycle) : une vraie bande n'a qu'un seul defilement, donc au repos (Largeur=0
+    // ou Mono actif) les deux canaux restent parfaitement synchrones.
     for (int n = 0; n < numSamples; ++n)
     {
         const float timeMs      = timeSmoothed.getNextValue();
@@ -208,24 +227,30 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float mixAmt      = mixSmoothed.getNextValue();
         const float rateHz      = driftRateSmoothed.getNextValue();
         const float depthAmt    = driftDepthSmoothed.getNextValue();
+        const float widthAmt    = widthSmoothed.getNextValue();
 
         driftPhase += rateHz / (float) currentSampleRate;
         if (driftPhase >= 1.0f)
             driftPhase -= 1.0f;
-        const float lfo = std::sin (driftPhase * juce::MathConstants<float>::twoPi);
+
+        float driftPhaseR = driftPhase + widthAmt * 0.5f;
+        if (driftPhaseR >= 1.0f)
+            driftPhaseR -= 1.0f;
+
+        const float lfoL = std::sin (driftPhase  * juce::MathConstants<float>::twoPi);
+        const float lfoR = std::sin (driftPhaseR * juce::MathConstants<float>::twoPi);
 
         const float modDepthMs = depthAmt * timeMs * 0.2f;
-        const float modulatedTimeMs = juce::jmax (0.1f, timeMs + lfo * modDepthMs);
-        const float delaySamples = modulatedTimeMs * 0.001f * (float) currentSampleRate;
-
-        delayLine.setDelay (delaySamples);
+        const float delaySamplesL = juce::jmax (0.1f, timeMs + lfoL * modDepthMs) * 0.001f * (float) currentSampleRate;
+        const float delaySamplesR = juce::jmax (0.1f, timeMs + lfoR * modDepthMs) * 0.001f * (float) currentSampleRate;
+        const float channelDelaySamples[2] = { delaySamplesL, delaySamplesR };
 
         for (int ch = 0; ch < numChannels; ++ch)
         {
             auto* data = buffer.getWritePointer (ch);
             const float inputSample = data[n];
 
-            const float delayedSample = delayLine.popSample (ch);
+            const float delayedSample = delayLine.popSample (ch, channelDelaySamples[ch]);
             const float toPush = inputSample + delayedSample * feedbackAmt;
             delayLine.pushSample (ch, toPush);
 

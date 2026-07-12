@@ -15,6 +15,7 @@ public:
 
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
     struct KnobWithLabel
     {
@@ -25,7 +26,10 @@ private:
 
     DigitapeAudioProcessor& audioProcessor;
 
-    KnobWithLabel timeKnob, feedbackKnob, mixKnob, driftRateKnob, driftDepthKnob;
+    KnobWithLabel timeKnob, feedbackKnob, mixKnob, driftRateKnob, driftDepthKnob, widthKnob;
+
+    juce::ToggleButton monoButton { "Mono" };
+    std::unique_ptr<ButtonAttachment> monoAttachment;
 
     void setupKnob (KnobWithLabel& knob, const juce::String& paramID, const juce::String& labelText);
 
