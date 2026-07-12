@@ -180,7 +180,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 
     for (int ch = 0; ch < 2; ++ch)
     {
-        holdCounter[ch] = 0;
+        holdPhase[ch] = 0.0f;
         heldValue[ch] = 0.0f;
     }
 }
@@ -308,14 +308,12 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // répétitions s'assalissent progressivement plutôt que d'un coup.
             if (integrityAmt > 0.0001f)
             {
-                if (holdCounter[ch] <= 0)
+                const float holdSamples = 1.0f + integrityAmt * 28.0f;
+                holdPhase[ch] += 1.0f / holdSamples;
+                if (holdPhase[ch] >= 1.0f)
                 {
+                    holdPhase[ch] -= 1.0f;
                     heldValue[ch] = toPush;
-                    holdCounter[ch] = 1 + juce::roundToInt (integrityAmt * 7.0f);
-                }
-                else
-                {
-                    --holdCounter[ch];
                 }
                 toPush = heldValue[ch];
 

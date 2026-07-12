@@ -48,7 +48,9 @@ private:
 
     // Integrite : crunch de quantification (+ severe a bas niveau) et decimation
     // sample-and-hold, appliques a ce qui entre dans la memoire de la boucle.
-    int holdCounter[2] { 0, 0 };
+    // holdPhase est un accumulateur continu (pas un compteur entier) pour eviter
+    // que la duree de maintien saute par paliers quand le parametre varie.
+    float holdPhase[2] { 0.0f, 0.0f };
     float heldValue[2] { 0.0f, 0.0f };
 
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLine { 192000 };
