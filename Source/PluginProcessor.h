@@ -46,9 +46,14 @@ private:
     float driftPhase { 0.0f };
     float steppedGlideL { 0.0f }, steppedGlideR { 0.0f };
 
+    // Integrite : crunch de quantification (+ severe a bas niveau) et decimation
+    // sample-and-hold, appliques a ce qui entre dans la memoire de la boucle.
+    int holdCounter[2] { 0, 0 };
+    float heldValue[2] { 0.0f, 0.0f };
+
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLine { 192000 };
 
-    juce::SmoothedValue<float> timeSmoothed, feedbackSmoothed, mixSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed;
+    juce::SmoothedValue<float> timeSmoothed, feedbackSmoothed, mixSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed, integritySmoothed;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DigitapeAudioProcessor)
 };

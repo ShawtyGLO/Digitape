@@ -68,6 +68,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "integrity", 1 }, "Integrite",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.25f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
     return { params.begin(), params.end() };
 }
 
@@ -157,6 +163,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     driftDepthSmoothed.reset (sampleRate, smoothTime);
     widthSmoothed.reset (sampleRate, smoothTime);
     driftShapeSmoothed.reset (sampleRate, smoothTime);
+    integritySmoothed.reset (sampleRate, smoothTime);
 
     timeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("time"));
     feedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("feedback"));
@@ -165,10 +172,17 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     driftDepthSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftDepth"));
     widthSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("width"));
     driftShapeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftShape"));
+    integritySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("integrity"));
 
     driftPhase = 0.0f;
     steppedGlideL = 0.0f;
     steppedGlideR = 0.0f;
+
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        holdCounter[ch] = 0;
+        heldValue[ch] = 0.0f;
+    }
 }
 
 void DigitapeAudioProcessor::releaseResources()
@@ -224,6 +238,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const bool monoEngaged = *apvts.getRawParameterValue ("mono") > 0.5f;
     widthSmoothed.setTargetValue (monoEngaged ? 0.0f : *apvts.getRawParameterValue ("width"));
     driftShapeSmoothed.setTargetValue (*apvts.getRawParameterValue ("driftShape"));
+    integritySmoothed.setTargetValue (*apvts.getRawParameterValue ("integrity"));
 
     // Moteur temps : ligne a retard modulee par la Derive, avec reinjection et mix.
     // La derive fait osciller le temps de lecture autour de la valeur cible : c'est
@@ -245,6 +260,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float depthAmt    = driftDepthSmoothed.getNextValue();
         const float widthAmt    = widthSmoothed.getNextValue();
         const float shapeAmt    = driftShapeSmoothed.getNextValue();
+        const float integrityAmt = integritySmoothed.getNextValue();
 
         driftPhase += rateHz / (float) currentSampleRate;
         if (driftPhase >= 1.0f)
@@ -285,7 +301,31 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float inputSample = data[n];
 
             const float delayedSample = delayLine.popSample (ch, channelDelaySamples[ch]);
-            const float toPush = inputSample + delayedSample * feedbackAmt;
+            float toPush = inputSample + delayedSample * feedbackAmt;
+
+            // Integrite : dégrade ce qui entre dans la mémoire de la boucle, pas le
+            // direct. Chaque passage réinjecte le résultat déjà dégradé, donc les
+            // répétitions s'assalissent progressivement plutôt que d'un coup.
+            if (integrityAmt > 0.0001f)
+            {
+                if (holdCounter[ch] <= 0)
+                {
+                    heldValue[ch] = toPush;
+                    holdCounter[ch] = 1 + juce::roundToInt (integrityAmt * 7.0f);
+                }
+                else
+                {
+                    --holdCounter[ch];
+                }
+                toPush = heldValue[ch];
+
+                const float absVal = std::abs (toPush);
+                const float lowLevelBoost = juce::jlimit (0.0f, 1.0f, 1.0f - absVal * 4.0f) * integrityAmt;
+                const float bits = juce::jlimit (2.0f, 16.0f, 16.0f - integrityAmt * 11.0f - lowLevelBoost * 4.0f);
+                const float levels = std::pow (2.0f, bits);
+                toPush = std::round (toPush * levels) / levels;
+            }
+
             delayLine.pushSample (ch, toPush);
 
             data[n] = inputSample * (1.0f - mixAmt) + delayedSample * mixAmt;

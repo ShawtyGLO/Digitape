@@ -12,11 +12,12 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     setupKnob (driftDepthKnob, "driftDepth", "Derive prof.");
     setupKnob (widthKnob,      "width",      "Largeur");
     setupKnob (driftShapeKnob, "driftShape", "Derive forme");
+    setupKnob (integrityKnob,  "integrity",  "Integrite");
 
     addAndMakeVisible (monoButton);
     monoAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "mono", monoButton);
 
-    setSize (760, 220);
+    setSize (860, 220);
 }
 
 DigitapeAudioProcessorEditor::~DigitapeAudioProcessorEditor()
@@ -48,7 +49,7 @@ void DigitapeAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds().withTrimmedTop (28).reduced (12);
 
-    KnobWithLabel* knobs[] = { &timeKnob, &feedbackKnob, &mixKnob, &driftRateKnob, &driftDepthKnob, &widthKnob, &driftShapeKnob };
+    KnobWithLabel* knobs[] = { &timeKnob, &feedbackKnob, &mixKnob, &driftRateKnob, &driftDepthKnob, &widthKnob, &driftShapeKnob, &integrityKnob };
     const int numKnobs = (int) std::size (knobs);
     const int columnWidth = area.getWidth() / numKnobs;
 
