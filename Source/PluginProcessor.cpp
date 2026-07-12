@@ -1,6 +1,20 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+namespace
+{
+    // Transparent sous le seuil, sature en douceur au-dessus (jamais de clip dur) -
+    // borne mathematiquement a ceiling + 1.0 quelle que soit l'ampleur de l'emballement.
+    inline float softSafetyCeiling (float x, float ceiling)
+    {
+        const float absX = std::abs (x);
+        if (absX <= ceiling)
+            return x;
+        const float sign = x < 0.0f ? -1.0f : 1.0f;
+        return sign * (ceiling + std::tanh (absX - ceiling));
+    }
+}
+
 //==============================================================================
 DigitapeAudioProcessor::DigitapeAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -61,6 +75,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         juce::ParameterID { "mono", 1 }, "Mono", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "safety", 1 }, "Securite", true));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "driftShape", 1 }, "Derive forme",
@@ -236,6 +253,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // Mono verrouille en amont : il annule l'effet de Largeur plutot que de sommer
     // la sortie apres coup, donc rien a annuler et Largeur garde sa position propre.
     const bool monoEngaged = *apvts.getRawParameterValue ("mono") > 0.5f;
+    const bool safetyOn = *apvts.getRawParameterValue ("safety") > 0.5f;
     widthSmoothed.setTargetValue (monoEngaged ? 0.0f : *apvts.getRawParameterValue ("width"));
     driftShapeSmoothed.setTargetValue (*apvts.getRawParameterValue ("driftShape"));
     integritySmoothed.setTargetValue (*apvts.getRawParameterValue ("integrity"));
@@ -324,9 +342,15 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 toPush = std::round (toPush * levels) / levels;
             }
 
+            if (safetyOn)
+                toPush = softSafetyCeiling (toPush, 1.2f);
+
             delayLine.pushSample (ch, toPush);
 
-            data[n] = inputSample * (1.0f - mixAmt) + delayedSample * mixAmt;
+            float outSample = inputSample * (1.0f - mixAmt) + delayedSample * mixAmt;
+            if (safetyOn)
+                outSample = softSafetyCeiling (outSample, 1.2f);
+            data[n] = outSample;
         }
     }
 }

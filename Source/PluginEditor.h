@@ -31,6 +31,9 @@ private:
     juce::ToggleButton monoButton { "Mono" };
     std::unique_ptr<ButtonAttachment> monoAttachment;
 
+    juce::ToggleButton safetyButton { "Securite" };
+    std::unique_ptr<ButtonAttachment> safetyAttachment;
+
     void setupKnob (KnobWithLabel& knob, const juce::String& paramID, const juce::String& labelText);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DigitapeAudioProcessorEditor)

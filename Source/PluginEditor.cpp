@@ -17,6 +17,9 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     addAndMakeVisible (monoButton);
     monoAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "mono", monoButton);
 
+    addAndMakeVisible (safetyButton);
+    safetyAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "safety", safetyButton);
+
     setSize (860, 220);
 }
 
@@ -60,6 +63,8 @@ void DigitapeAudioProcessorEditor::resized()
 
         if (knobs[i] == &widthKnob)
             monoButton.setBounds (column.removeFromBottom (24));
+        else if (knobs[i] == &integrityKnob)
+            safetyButton.setBounds (column.removeFromBottom (24));
 
         knobs[i]->slider.setBounds (column.reduced (6));
     }
