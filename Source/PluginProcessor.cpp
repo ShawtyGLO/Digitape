@@ -41,8 +41,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "time", 1 }, "Temps",
-        juce::NormalisableRange<float> (1.0f, 2000.0f, 0.01f, 0.3f), 250.0f,
+        juce::NormalisableRange<float> (1.0f, 6000.0f, 0.01f, 0.3f), 250.0f,
         juce::AudioParameterFloatAttributes().withLabel ("ms")));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "wetGain", 1 }, "Niveau repetitions",
+        juce::NormalisableRange<float> (-24.0f, 12.0f, 0.01f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("dB")));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "feedback", 1 }, "Reinjection",
@@ -141,7 +146,7 @@ bool DigitapeAudioProcessor::isMidiEffect() const
 
 double DigitapeAudioProcessor::getTailLengthSeconds() const
 {
-    return 2.0;
+    return 8.0;
 }
 
 int DigitapeAudioProcessor::getNumPrograms()
@@ -180,7 +185,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     spec.maximumBlockSize = (juce::uint32) samplesPerBlock;
     spec.numChannels = 2;
 
-    delayLine.setMaximumDelayInSamples ((int) (3.0 * sampleRate));
+    delayLine.setMaximumDelayInSamples ((int) (8.0 * sampleRate));
     delayLine.prepare (spec);
     delayLine.reset();
 
@@ -195,6 +200,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     integritySmoothed.reset (sampleRate, smoothTime);
     bitcrushAmountSmoothed.reset (sampleRate, smoothTime);
     decimationAmountSmoothed.reset (sampleRate, smoothTime);
+    wetGainSmoothed.reset (sampleRate, smoothTime);
 
     timeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("time"));
     feedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("feedback"));
@@ -206,6 +212,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     integritySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("integrity"));
     bitcrushAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
     decimationAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
+    wetGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("wetGain"));
 
     driftPhase = 0.0f;
     steppedGlideL = 0.0f;
@@ -215,6 +222,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     {
         holdPhase[ch] = 0.0f;
         heldValue[ch] = 0.0f;
+        decimLpState[ch] = 0.0f;
     }
 }
 
@@ -275,6 +283,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     integritySmoothed.setTargetValue (*apvts.getRawParameterValue ("integrity"));
     bitcrushAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
     decimationAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
+    wetGainSmoothed.setTargetValue (*apvts.getRawParameterValue ("wetGain"));
 
     // Moteur temps : ligne a retard modulee par la Derive, avec reinjection et mix.
     // La derive fait osciller le temps de lecture autour de la valeur cible : c'est
@@ -299,6 +308,8 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float integrityAmt = integritySmoothed.getNextValue();
         const float bitcrushAmt  = bitcrushAmountSmoothed.getNextValue();
         const float decimAmount  = decimationAmountSmoothed.getNextValue();
+        const float wetGainDb    = wetGainSmoothed.getNextValue();
+        const float wetGainLin   = juce::Decibels::decibelsToGain (wetGainDb);
 
         driftPhase += rateHz / (float) currentSampleRate;
         if (driftPhase >= 1.0f)
@@ -360,6 +371,15 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 }
                 toPush = heldValue[ch];
 
+                // La decimation cree des harmoniques inharmoniques, percues comme
+                // plus dures/fortes qu'un simple crunch a niveau egal. Un passe-bas
+                // qui s'assombrit avec la quantite adoucit ce cote agressif sans
+                // reduire le volume ni attenuer le caractere lui-meme.
+                const float decimCutoffHz = 18000.0f - decimAmt * 14000.0f;
+                const float decimLpCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * decimCutoffHz / (float) currentSampleRate);
+                decimLpState[ch] += (toPush - decimLpState[ch]) * decimLpCoeff;
+                toPush = decimLpState[ch];
+
                 const float absVal = std::abs (toPush);
                 const float lowLevelBoost = juce::jlimit (0.0f, 1.0f, 1.0f - absVal * 4.0f) * crushAmt;
                 const float bits = juce::jlimit (2.0f, 16.0f, 16.0f - crushAmt * 11.0f - lowLevelBoost * 4.0f);
@@ -372,7 +392,10 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
             delayLine.pushSample (ch, toPush);
 
-            float outSample = inputSample * (1.0f - mixAmt) + delayedSample * mixAmt;
+            // Niveau des repetitions : trim independant du Mix, applique seulement a la
+            // sortie (jamais a ce qui repart dans la boucle) pour ne pas interferer avec
+            // la stabilite du feedback ni avec la Securite.
+            float outSample = inputSample * (1.0f - mixAmt) + delayedSample * wetGainLin * mixAmt;
             if (safetyOn)
                 outSample = softSafetyCeiling (outSample, 1.2f);
             data[n] = outSample;

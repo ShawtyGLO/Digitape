@@ -52,6 +52,7 @@ private:
     // que la duree de maintien saute par paliers quand le parametre varie.
     float holdPhase[2] { 0.0f, 0.0f };
     float heldValue[2] { 0.0f, 0.0f };
+    float decimLpState[2] { 0.0f, 0.0f };
 
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLine { 192000 };
 
@@ -61,6 +62,8 @@ private:
     // individuelle entre mecanismes de l'Integrite, la macro pilotant toujours
     // l'intensite globale.
     juce::SmoothedValue<float> bitcrushAmountSmoothed, decimationAmountSmoothed;
+
+    juce::SmoothedValue<float> wetGainSmoothed;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DigitapeAudioProcessor)
 };
