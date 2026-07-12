@@ -50,6 +50,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("dB")));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "syncAmount", 1 }, "Sync accroche",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "syncNoteValue", 1 }, "Sync division",
+        juce::StringArray { "1/32", "1/16", "1/8", "1/4", "1/2", "1/1" }, 2));
+
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "syncFlavor", 1 }, "Sync saveur",
+        juce::StringArray { "Droit", "Pointe", "Triolet" }, 0));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "feedback", 1 }, "Reinjection",
         juce::NormalisableRange<float> (0.0f, 0.95f, 0.001f), 0.3f,
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
@@ -201,6 +215,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     bitcrushAmountSmoothed.reset (sampleRate, smoothTime);
     decimationAmountSmoothed.reset (sampleRate, smoothTime);
     wetGainSmoothed.reset (sampleRate, smoothTime);
+    syncAmountSmoothed.reset (sampleRate, smoothTime);
 
     timeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("time"));
     feedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("feedback"));
@@ -213,6 +228,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     bitcrushAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
     decimationAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("wetGain"));
+    syncAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("syncAmount"));
 
     driftPhase = 0.0f;
     steppedGlideL = 0.0f;
@@ -284,6 +300,28 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     bitcrushAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
     decimationAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setTargetValue (*apvts.getRawParameterValue ("wetGain"));
+    syncAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("syncAmount"));
+
+    // Sync tempo : calculee une fois par bloc (le tempo hote ne bouge pas a l'echantillon
+    // pres), verrouillage direct sur la division+saveur choisie plutot qu'une recherche
+    // de la plus proche - a 100% d'accroche, c'est un vrai delay synchronise classique.
+    double hostBpm = 120.0;
+    if (auto* hostPlayHead = getPlayHead())
+        if (auto position = hostPlayHead->getPosition())
+            if (auto bpm = position->getBpm())
+                hostBpm = *bpm;
+
+    static constexpr float noteBeats[6] = { 0.125f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f };
+    const int noteIndex = juce::jlimit (0, 5, (int) *apvts.getRawParameterValue ("syncNoteValue"));
+    const int flavorIndex = (int) *apvts.getRawParameterValue ("syncFlavor");
+
+    const float quarterNoteMs = (float) (60000.0 / juce::jmax (hostBpm, 1.0));
+    float syncedTimeMs = quarterNoteMs * noteBeats[noteIndex];
+    if (flavorIndex == 1)
+        syncedTimeMs *= 1.5f;
+    else if (flavorIndex == 2)
+        syncedTimeMs *= (2.0f / 3.0f);
+    syncedTimeMs = juce::jlimit (1.0f, 6000.0f, syncedTimeMs);
 
     // Moteur temps : ligne a retard modulee par la Derive, avec reinjection et mix.
     // La derive fait osciller le temps de lecture autour de la valeur cible : c'est
@@ -310,6 +348,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float decimAmount  = decimationAmountSmoothed.getNextValue();
         const float wetGainDb    = wetGainSmoothed.getNextValue();
         const float wetGainLin   = juce::Decibels::decibelsToGain (wetGainDb);
+        const float syncAmt      = syncAmountSmoothed.getNextValue();
+
+        const float effectiveTimeMs = timeMs * (1.0f - syncAmt) + syncedTimeMs * syncAmt;
 
         driftPhase += rateHz / (float) currentSampleRate;
         if (driftPhase >= 1.0f)
@@ -339,9 +380,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float lfoL = lfoSmoothL * (1.0f - shapeAmt) + steppedGlideL * shapeAmt;
         const float lfoR = lfoSmoothR * (1.0f - shapeAmt) + steppedGlideR * shapeAmt;
 
-        const float modDepthMs = depthAmt * timeMs * 0.2f;
-        const float delaySamplesL = juce::jmax (0.1f, timeMs + lfoL * modDepthMs) * 0.001f * (float) currentSampleRate;
-        const float delaySamplesR = juce::jmax (0.1f, timeMs + lfoR * modDepthMs) * 0.001f * (float) currentSampleRate;
+        const float modDepthMs = depthAmt * effectiveTimeMs * 0.2f;
+        const float delaySamplesL = juce::jmax (0.1f, effectiveTimeMs + lfoL * modDepthMs) * 0.001f * (float) currentSampleRate;
+        const float delaySamplesR = juce::jmax (0.1f, effectiveTimeMs + lfoR * modDepthMs) * 0.001f * (float) currentSampleRate;
         const float channelDelaySamples[2] = { delaySamplesL, delaySamplesR };
 
         for (int ch = 0; ch < numChannels; ++ch)

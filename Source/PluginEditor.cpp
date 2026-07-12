@@ -16,6 +16,15 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     setupKnob (bitcrushAmountKnob,   "bitcrushAmount",   "Bitcrush (adv)");
     setupKnob (decimationAmountKnob, "decimationAmount", "Decimation (adv)");
     setupKnob (wetGainKnob, "wetGain", "Niv. repet.");
+    setupKnob (syncAmountKnob, "syncAmount", "Sync accroche");
+
+    syncNoteCombo.addItemList ({ "1/32", "1/16", "1/8", "1/4", "1/2", "1/1" }, 1);
+    addAndMakeVisible (syncNoteCombo);
+    syncNoteAttachment = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, "syncNoteValue", syncNoteCombo);
+
+    syncFlavorCombo.addItemList ({ "Droit", "Pointe", "Triolet" }, 1);
+    addAndMakeVisible (syncFlavorCombo);
+    syncFlavorAttachment = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, "syncFlavor", syncFlavorCombo);
 
     addAndMakeVisible (monoButton);
     monoAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "mono", monoButton);
@@ -23,7 +32,7 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     addAndMakeVisible (safetyButton);
     safetyAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "safety", safetyButton);
 
-    setSize (1140, 220);
+    setSize (1320, 220);
 }
 
 DigitapeAudioProcessorEditor::~DigitapeAudioProcessorEditor()
@@ -56,7 +65,7 @@ void DigitapeAudioProcessorEditor::resized()
     auto area = getLocalBounds().withTrimmedTop (28).reduced (12);
 
     KnobWithLabel* knobs[] = { &timeKnob, &feedbackKnob, &mixKnob, &driftRateKnob, &driftDepthKnob, &widthKnob, &driftShapeKnob,
-                               &integrityKnob, &bitcrushAmountKnob, &decimationAmountKnob, &wetGainKnob };
+                               &integrityKnob, &bitcrushAmountKnob, &decimationAmountKnob, &wetGainKnob, &syncAmountKnob };
     const int numKnobs = (int) std::size (knobs);
     const int columnWidth = area.getWidth() / numKnobs;
 
@@ -69,6 +78,11 @@ void DigitapeAudioProcessorEditor::resized()
             monoButton.setBounds (column.removeFromBottom (24));
         else if (knobs[i] == &integrityKnob)
             safetyButton.setBounds (column.removeFromBottom (24));
+        else if (knobs[i] == &syncAmountKnob)
+        {
+            syncFlavorCombo.setBounds (column.removeFromBottom (22));
+            syncNoteCombo.setBounds (column.removeFromBottom (22));
+        }
 
         knobs[i]->slider.setBounds (column.reduced (6));
     }

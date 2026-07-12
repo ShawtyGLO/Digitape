@@ -65,5 +65,10 @@ private:
 
     juce::SmoothedValue<float> wetGainSmoothed;
 
+    // Sync tempo : accroche continue vers une division rythmique choisie (pas une
+    // recherche de la plus proche) - a 100%, le temps se verrouille purement sur
+    // cette division ; entre 0 et 100%, glissement entre le temps libre et la cible.
+    juce::SmoothedValue<float> syncAmountSmoothed;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DigitapeAudioProcessor)
 };
