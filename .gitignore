@@ -1,0 +1,28 @@
+# Fichiers de configuration JUCE
+/Builds/
+
+# Visual Studio (Windows)
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.db
+*.opendb
+Debug/
+Release/
+x64/
+Win32/
+
+# Xcode (macOS)
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+.DS_Store
+
+# Fichiers temporaires et builds OS
+*.o
+*.obj
+*.log
