@@ -26,7 +26,8 @@ private:
 
     DigitapeAudioProcessor& audioProcessor;
 
-    KnobWithLabel timeKnob, feedbackKnob, mixKnob, driftRateKnob, driftDepthKnob, widthKnob, driftShapeKnob, integrityKnob;
+    KnobWithLabel timeKnob, feedbackKnob, mixKnob, driftRateKnob, driftDepthKnob, widthKnob, driftShapeKnob, integrityKnob,
+                  bitcrushAmountKnob, decimationAmountKnob;
 
     juce::ToggleButton monoButton { "Mono" };
     std::unique_ptr<ButtonAttachment> monoAttachment;

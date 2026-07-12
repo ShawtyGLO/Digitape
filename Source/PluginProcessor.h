@@ -57,5 +57,10 @@ private:
 
     juce::SmoothedValue<float> timeSmoothed, feedbackSmoothed, mixSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed, integritySmoothed;
 
+    // Panneau Advanced (v0 en sliders plats, pas encore de repli visuel) : balance
+    // individuelle entre mecanismes de l'Integrite, la macro pilotant toujours
+    // l'intensite globale.
+    juce::SmoothedValue<float> bitcrushAmountSmoothed, decimationAmountSmoothed;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DigitapeAudioProcessor)
 };
