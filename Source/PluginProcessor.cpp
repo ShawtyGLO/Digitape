@@ -189,6 +189,15 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     const int numChannels = juce::jmin (buffer.getNumChannels(), 2);
 
+    // Les sliders ne changent que la valeur cible de l'APVTS : sans ces lignes,
+    // les SmoothedValue restent figes sur l'etat du tout premier prepareToPlay
+    // et ignorent tout ce que l'utilisateur regle ensuite dans l'interface.
+    timeSmoothed.setTargetValue       (*apvts.getRawParameterValue ("time"));
+    feedbackSmoothed.setTargetValue   (*apvts.getRawParameterValue ("feedback"));
+    mixSmoothed.setTargetValue        (*apvts.getRawParameterValue ("mix"));
+    driftRateSmoothed.setTargetValue  (*apvts.getRawParameterValue ("driftRate"));
+    driftDepthSmoothed.setTargetValue (*apvts.getRawParameterValue ("driftDepth"));
+
     // Moteur temps : ligne a retard modulee par la Derive, avec reinjection et mix.
     // La derive fait osciller le temps de lecture autour de la valeur cible : c'est
     // ce mouvement lui-meme qui produit le wow/flutter, pas un effet ajoute a part.
