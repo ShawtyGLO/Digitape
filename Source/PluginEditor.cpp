@@ -17,6 +17,9 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     setupKnob (decimationAmountKnob, "decimationAmount", "Decimation (adv)");
     setupKnob (wetGainKnob, "wetGain", "Niv. repet.");
     setupKnob (syncAmountKnob, "syncAmount", "Sync accroche");
+    setupKnob (reverbSizeKnob, "reverbSize", "Reverbe taille");
+    setupKnob (reverbCharacterKnob, "reverbCharacter", "Reverbe caract.");
+    setupKnob (reverbMixKnob, "reverbMix", "Reverbe mix");
 
     syncNoteCombo.addItemList ({ "1/32", "1/16", "1/8", "1/4", "1/2", "1/1" }, 1);
     addAndMakeVisible (syncNoteCombo);
@@ -32,7 +35,7 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     addAndMakeVisible (safetyButton);
     safetyAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "safety", safetyButton);
 
-    setSize (1320, 220);
+    setSize (1620, 220);
 }
 
 DigitapeAudioProcessorEditor::~DigitapeAudioProcessorEditor()
@@ -65,7 +68,8 @@ void DigitapeAudioProcessorEditor::resized()
     auto area = getLocalBounds().withTrimmedTop (28).reduced (12);
 
     KnobWithLabel* knobs[] = { &timeKnob, &feedbackKnob, &mixKnob, &driftRateKnob, &driftDepthKnob, &widthKnob, &driftShapeKnob,
-                               &integrityKnob, &bitcrushAmountKnob, &decimationAmountKnob, &wetGainKnob, &syncAmountKnob };
+                               &integrityKnob, &bitcrushAmountKnob, &decimationAmountKnob, &wetGainKnob, &syncAmountKnob,
+                               &reverbSizeKnob, &reverbCharacterKnob, &reverbMixKnob };
     const int numKnobs = (int) std::size (knobs);
     const int columnWidth = area.getWidth() / numKnobs;
 

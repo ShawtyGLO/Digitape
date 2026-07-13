@@ -64,6 +64,24 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::StringArray { "Droit", "Pointe", "Triolet" }, 0));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverbSize", 1 }, "Reverbe taille",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverbCharacter", 1 }, "Reverbe caractere",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverbMix", 1 }, "Reverbe mix",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "feedback", 1 }, "Reinjection",
         juce::NormalisableRange<float> (0.0f, 0.95f, 0.001f), 0.3f,
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
@@ -203,6 +221,9 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     delayLine.prepare (spec);
     delayLine.reset();
 
+    reverb.prepare (spec);
+    reverb.reset();
+
     const double smoothTime = 0.02;
     timeSmoothed.reset (sampleRate, smoothTime);
     feedbackSmoothed.reset (sampleRate, smoothTime);
@@ -216,6 +237,9 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     decimationAmountSmoothed.reset (sampleRate, smoothTime);
     wetGainSmoothed.reset (sampleRate, smoothTime);
     syncAmountSmoothed.reset (sampleRate, smoothTime);
+    reverbSizeSmoothed.reset (sampleRate, smoothTime);
+    reverbCharacterSmoothed.reset (sampleRate, smoothTime);
+    reverbMixSmoothed.reset (sampleRate, smoothTime);
 
     timeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("time"));
     feedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("feedback"));
@@ -229,6 +253,9 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     decimationAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("wetGain"));
     syncAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("syncAmount"));
+    reverbSizeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbSize"));
+    reverbCharacterSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbCharacter"));
+    reverbMixSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbMix"));
 
     driftPhase = 0.0f;
     steppedGlideL = 0.0f;
@@ -301,6 +328,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     decimationAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setTargetValue (*apvts.getRawParameterValue ("wetGain"));
     syncAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("syncAmount"));
+    reverbSizeSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbSize"));
+    reverbCharacterSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbCharacter"));
+    reverbMixSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbMix"));
 
     // Sync tempo : calculee une fois par bloc (le tempo hote ne bouge pas a l'echantillon
     // pres), verrouillage direct sur la division+saveur choisie plutot qu'une recherche
@@ -440,6 +470,43 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             if (safetyOn)
                 outSample = softSafetyCeiling (outSample, 1.2f);
             data[n] = outSample;
+        }
+    }
+
+    // --- Reverbe (v0 : moteur JUCE integre en attendant le reseau custom) ---
+    // Recoit la sortie du Moteur temps (routage serial, coherent avec la future
+    // Reinjection croisee). Caractere n'est qu'une version simplifiee (damping seul)
+    // du futur axe structurel du reseau maison - assume comme placeholder honnete.
+    const float reverbSizeVal = reverbSizeSmoothed.getNextValue();
+    const float reverbCharVal = reverbCharacterSmoothed.getNextValue();
+    const float reverbMixVal  = reverbMixSmoothed.getNextValue();
+
+    juce::dsp::Reverb::Parameters reverbParams;
+    reverbParams.roomSize   = reverbSizeVal;
+    reverbParams.damping    = reverbCharVal;
+    reverbParams.wetLevel   = 1.0f;
+    reverbParams.dryLevel   = 0.0f;
+    reverbParams.width      = 1.0f;
+    reverbParams.freezeMode = 0.0f;
+    reverb.setParameters (reverbParams);
+
+    juce::AudioBuffer<float> reverbDry;
+    reverbDry.makeCopyOf (buffer, true);
+
+    juce::dsp::AudioBlock<float> reverbBlock (buffer);
+    juce::dsp::ProcessContextReplacing<float> reverbContext (reverbBlock);
+    reverb.process (reverbContext);
+
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        auto* data = buffer.getWritePointer (ch);
+        const auto* dryData = reverbDry.getReadPointer (ch);
+        for (int n = 0; n < numSamples; ++n)
+        {
+            float mixed = dryData[n] * (1.0f - reverbMixVal) + data[n] * reverbMixVal;
+            if (safetyOn)
+                mixed = softSafetyCeiling (mixed, 1.2f);
+            data[n] = mixed;
         }
     }
 }

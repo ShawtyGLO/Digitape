@@ -56,6 +56,10 @@ private:
 
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLine { 192000 };
 
+    // Reverbe v0 : moteur JUCE integre, remplace plus tard par le reseau FDN maison.
+    juce::dsp::Reverb reverb;
+    juce::SmoothedValue<float> reverbSizeSmoothed, reverbCharacterSmoothed, reverbMixSmoothed;
+
     juce::SmoothedValue<float> timeSmoothed, feedbackSmoothed, mixSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed, integritySmoothed;
 
     // Panneau Advanced (v0 en sliders plats, pas encore de repli visuel) : balance
