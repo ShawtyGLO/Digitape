@@ -42,6 +42,11 @@ namespace UI
         {
             constexpr Rect bitcrushAmountSlider   {   40.0f,   50.0f,   90.0f,   90.0f };
             constexpr Rect decimationAmountSlider {  170.0f,   50.0f,   90.0f,   90.0f };
+            constexpr Rect reverbPreDelaySlider   {   40.0f,  150.0f,   90.0f,   90.0f };
+            constexpr Rect reverbTransientSlider  {  170.0f,  150.0f,   90.0f,   90.0f };
+            constexpr Rect reverbHighpassSlider   {  300.0f,  150.0f,   90.0f,   90.0f };
+            constexpr Rect reverbLowpassSlider    {  430.0f,  150.0f,   90.0f,   90.0f };
+            constexpr Rect reverbBrightnessSlider {  560.0f,  150.0f,   90.0f,   90.0f };
         }
     }
 

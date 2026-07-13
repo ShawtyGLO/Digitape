@@ -82,6 +82,32 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverbPreDelay", 1 }, "Reverbe predelai",
+        juce::NormalisableRange<float> (0.0f, 150.0f, 0.01f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("ms")));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverbTransient", 1 }, "Reverbe transient",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverbHighpass", 1 }, "Reverbe HP",
+        juce::NormalisableRange<float> (20.0f, 2000.0f, 0.01f, 0.3f), 20.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("Hz")));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverbLowpass", 1 }, "Reverbe LP",
+        juce::NormalisableRange<float> (500.0f, 20000.0f, 0.01f, 0.3f), 20000.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("Hz")));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverbBrightness", 1 }, "Reverbe brightness",
+        juce::NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("")));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "feedback", 1 }, "Reinjection",
         juce::NormalisableRange<float> (0.0f, 0.95f, 0.001f), 0.3f,
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
@@ -224,6 +250,10 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverb.prepare (spec);
     reverb.reset();
 
+    preDelayLine.setMaximumDelayInSamples ((int) (0.2 * sampleRate));
+    preDelayLine.prepare (spec);
+    preDelayLine.reset();
+
     const double smoothTime = 0.02;
     timeSmoothed.reset (sampleRate, smoothTime);
     feedbackSmoothed.reset (sampleRate, smoothTime);
@@ -240,6 +270,11 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbSizeSmoothed.reset (sampleRate, smoothTime);
     reverbCharacterSmoothed.reset (sampleRate, smoothTime);
     reverbMixSmoothed.reset (sampleRate, smoothTime);
+    reverbPreDelaySmoothed.reset (sampleRate, smoothTime);
+    reverbTransientSmoothed.reset (sampleRate, smoothTime);
+    reverbHighpassSmoothed.reset (sampleRate, smoothTime);
+    reverbLowpassSmoothed.reset (sampleRate, smoothTime);
+    reverbBrightnessSmoothed.reset (sampleRate, smoothTime);
 
     timeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("time"));
     feedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("feedback"));
@@ -256,6 +291,20 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbSizeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbSize"));
     reverbCharacterSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbCharacter"));
     reverbMixSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbMix"));
+    reverbPreDelaySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbPreDelay"));
+    reverbTransientSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbTransient"));
+    reverbHighpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbHighpass"));
+    reverbLowpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbLowpass"));
+    reverbBrightnessSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbBrightness"));
+
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        transientFastEnv[ch] = 0.0f;
+        transientSlowEnv[ch] = 0.0f;
+        reverbHpState[ch] = 0.0f;
+        reverbLpState[ch] = 0.0f;
+        tiltLpState[ch] = 0.0f;
+    }
 
     driftPhase = 0.0f;
     steppedGlideL = 0.0f;
@@ -331,6 +380,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     reverbSizeSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbSize"));
     reverbCharacterSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbCharacter"));
     reverbMixSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbMix"));
+    reverbPreDelaySmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbPreDelay"));
+    reverbTransientSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbTransient"));
+    reverbHighpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbHighpass"));
+    reverbLowpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbLowpass"));
+    reverbBrightnessSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbBrightness"));
 
     // Sync tempo : calculee une fois par bloc (le tempo hote ne bouge pas a l'echantillon
     // pres), verrouillage direct sur la division+saveur choisie plutot qu'une recherche
@@ -477,9 +531,14 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // Recoit la sortie du Moteur temps (routage serial, coherent avec la future
     // Reinjection croisee). Caractere n'est qu'une version simplifiee (damping seul)
     // du futur axe structurel du reseau maison - assume comme placeholder honnete.
-    const float reverbSizeVal = reverbSizeSmoothed.getNextValue();
-    const float reverbCharVal = reverbCharacterSmoothed.getNextValue();
-    const float reverbMixVal  = reverbMixSmoothed.getNextValue();
+    const float reverbSizeVal   = reverbSizeSmoothed.getNextValue();
+    const float reverbCharVal   = reverbCharacterSmoothed.getNextValue();
+    const float reverbMixVal    = reverbMixSmoothed.getNextValue();
+    const float preDelayMs      = reverbPreDelaySmoothed.getNextValue();
+    const float transientAmt    = reverbTransientSmoothed.getNextValue();
+    const float highpassHz      = reverbHighpassSmoothed.getNextValue();
+    const float lowpassHz       = reverbLowpassSmoothed.getNextValue();
+    const float brightnessVal   = reverbBrightnessSmoothed.getNextValue();
 
     juce::dsp::Reverb::Parameters reverbParams;
     reverbParams.roomSize   = reverbSizeVal;
@@ -493,9 +552,51 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     juce::AudioBuffer<float> reverbDry;
     reverbDry.makeCopyOf (buffer, true);
 
+    // Etages d'entree : Transient (adoucit l'attaque courte pour une reverbe plus
+    // ambiante) -> Input HP/LP (evite l'engorgement grave/aigu dans le reservoir) ->
+    // Pre-delai. Tous independants du moteur, ne bougeront pas au remplacement par le FDN.
+    const float transientFastCoeff = 1.0f - std::exp (-1.0f / (0.003f * (float) currentSampleRate));
+    const float transientSlowCoeff = 1.0f - std::exp (-1.0f / (0.08f  * (float) currentSampleRate));
+    const float hpCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * highpassHz / (float) currentSampleRate);
+    const float lpCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * lowpassHz  / (float) currentSampleRate);
+    const float preDelaySamples = preDelayMs * 0.001f * (float) currentSampleRate;
+
+    for (int n = 0; n < numSamples; ++n)
+    {
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            auto* data = buffer.getWritePointer (ch);
+            float x = data[n];
+
+            const float absX = std::abs (x);
+            transientFastEnv[ch] += (absX - transientFastEnv[ch]) * transientFastCoeff;
+            transientSlowEnv[ch] += (absX - transientSlowEnv[ch]) * transientSlowCoeff;
+            const float spike = juce::jmax (0.0f, transientFastEnv[ch] - transientSlowEnv[ch]);
+            const float duck = juce::jlimit (0.0f, 1.0f, transientAmt * spike * 6.0f);
+            x *= (1.0f - duck);
+
+            reverbHpState[ch] += (x - reverbHpState[ch]) * hpCoeff;
+            x = x - reverbHpState[ch];
+
+            reverbLpState[ch] += (x - reverbLpState[ch]) * lpCoeff;
+            x = reverbLpState[ch];
+
+            const float preDelayed = preDelayLine.popSample (ch, preDelaySamples);
+            preDelayLine.pushSample (ch, x);
+
+            data[n] = preDelayed;
+        }
+    }
+
     juce::dsp::AudioBlock<float> reverbBlock (buffer);
     juce::dsp::ProcessContextReplacing<float> reverbContext (reverbBlock);
     reverb.process (reverbContext);
+
+    // Brightness : tilt sur le humide seul (jamais le direct) - separation lisse/aigu
+    // via un simple passe-bas, puis rebalance des deux bandes.
+    const float tiltCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * 900.0f / (float) currentSampleRate);
+    const float lowGain  = 1.0f - brightnessVal * 0.6f;
+    const float highGain = 1.0f + brightnessVal * 0.6f;
 
     for (int ch = 0; ch < numChannels; ++ch)
     {
@@ -503,7 +604,13 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const auto* dryData = reverbDry.getReadPointer (ch);
         for (int n = 0; n < numSamples; ++n)
         {
-            float mixed = dryData[n] * (1.0f - reverbMixVal) + data[n] * reverbMixVal;
+            float wet = data[n];
+            tiltLpState[ch] += (wet - tiltLpState[ch]) * tiltCoeff;
+            const float lowBand  = tiltLpState[ch];
+            const float highBand = wet - lowBand;
+            wet = lowBand * lowGain + highBand * highGain;
+
+            float mixed = dryData[n] * (1.0f - reverbMixVal) + wet * reverbMixVal;
             if (safetyOn)
                 mixed = softSafetyCeiling (mixed, 1.2f);
             data[n] = mixed;

@@ -1,8 +1,11 @@
 {
   "meta": {
     "baseWidth": 760,
-    "note": "Source de vérité du layout de Digitape, en coordonnées de base (avant scale). Édité via tools/plugin-factory.html. Sert à régénérer Source/Generated/UILayout.h.",
-    "generatedFrom": "Rangement par module puis reorganisation manuelle par l'utilisateur dans Plugin Factory, 2026-07-12"
+    "note": "Source de vérité du layout de Digitape, en coordonnées de base (avant scale). Édité via Shawty's Plugin Factory (outil central). Sert à régénérer Source/Generated/UILayout.h.",
+    "generatedFrom": "Rangement par module puis reorganisation manuelle par l'utilisateur dans Plugin Factory, 2026-07-12",
+    "project": "Digitape",
+    "groups": {"text":"#cddd7a","btn":"#9fb0ab","temps":"#8e7bd6","derive":"#4bb58a","integrite":"#e0864a","reverbe":"#13add6"},
+    "typemap": {"syncNoteCombo":"button","syncFlavorCombo":"button"}
   },
   "states": {
     "facade": {
@@ -32,11 +35,16 @@
     },
     "advanced": {
       "label": "Advanced (panneau déplié)",
-      "height": 200,
+      "height": 280,
       "zones": [],
       "controls": [
         { "id": "bitcrushAmountSlider", "label": "Bitcrush", "group": "integrite", "x": 40, "y": 50, "w": 90, "h": 90 },
-        { "id": "decimationAmountSlider", "label": "Decimation", "group": "integrite", "x": 170, "y": 50, "w": 90, "h": 90 }
+        { "id": "decimationAmountSlider", "label": "Decimation", "group": "integrite", "x": 170, "y": 50, "w": 90, "h": 90 },
+        { "id": "reverbPreDelaySlider", "label": "Reverbe predelai", "group": "reverbe", "x": 40, "y": 150, "w": 90, "h": 90 },
+        { "id": "reverbTransientSlider", "label": "Reverbe transient", "group": "reverbe", "x": 170, "y": 150, "w": 90, "h": 90 },
+        { "id": "reverbHighpassSlider", "label": "Reverbe HP", "group": "reverbe", "x": 300, "y": 150, "w": 90, "h": 90 },
+        { "id": "reverbLowpassSlider", "label": "Reverbe LP", "group": "reverbe", "x": 430, "y": 150, "w": 90, "h": 90 },
+        { "id": "reverbBrightnessSlider", "label": "Reverbe brightness", "group": "reverbe", "x": 560, "y": 150, "w": 90, "h": 90 }
       ]
     }
   },

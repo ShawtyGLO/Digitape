@@ -60,6 +60,18 @@ private:
     juce::dsp::Reverb reverb;
     juce::SmoothedValue<float> reverbSizeSmoothed, reverbCharacterSmoothed, reverbMixSmoothed;
 
+    // Etages autour du moteur de reverbe (Transient, Input filter, Pre-delai, Brightness) -
+    // ne touchent jamais le moteur lui-meme, survivront tels quels au reseau FDN.
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> preDelayLine { 96000 };
+    float transientFastEnv[2] { 0.0f, 0.0f };
+    float transientSlowEnv[2] { 0.0f, 0.0f };
+    float reverbHpState[2]    { 0.0f, 0.0f };
+    float reverbLpState[2]    { 0.0f, 0.0f };
+    float tiltLpState[2]      { 0.0f, 0.0f };
+
+    juce::SmoothedValue<float> reverbPreDelaySmoothed, reverbTransientSmoothed,
+                                reverbHighpassSmoothed, reverbLowpassSmoothed, reverbBrightnessSmoothed;
+
     juce::SmoothedValue<float> timeSmoothed, feedbackSmoothed, mixSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed, integritySmoothed;
 
     // Panneau Advanced (v0 en sliders plats, pas encore de repli visuel) : balance

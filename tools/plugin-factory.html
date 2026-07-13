@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Shawty's Plugin Factory — Digitape</title>
+<title>Shawty's Plugin Factory</title>
 <style>
   :root{
     --bg:#0d1a1e; --panel:#132328; --panel2:#0f1e22; --line:#24413c;
@@ -39,6 +39,13 @@
   aside{width:286px;flex:none;background:var(--panel);border-left:1px solid var(--line);padding:12px;overflow:auto}
   aside h2{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:16px 0 7px}
   aside h2:first-child{margin-top:0}
+  .grpHead{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);margin:10px 0 3px;padding-bottom:2px;border-bottom:1px solid var(--line)}
+  .grpHead:first-child{margin-top:0}
+  .dropzone{border-radius:6px;transition:background .1s}
+  .dropzone.over{background:rgba(19,173,214,.12);outline:1px dashed var(--accent)}
+  .vitem[draggable="true"]{cursor:grab}
+  .vitem.dragging{opacity:.35}
+  .vitem.global{opacity:.6;cursor:default}
   .grid{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px 8px;align-items:center}
   .grid label{color:var(--muted)}
   .grid input{width:100%}
@@ -58,7 +65,7 @@
 </head>
 <body>
 <header>
-  <h1><span class="b">Shawty's</span> Plugin Factory — Digitape</h1>
+  <h1><span class="b">Shawty's</span> Plugin Factory</h1>
   <select id="stateSel" title="Fenêtre du plugin"></select>
   <label class="hint">H <input type="number" id="stateH" style="width:64px"></label>
   <div class="seg" role="tablist">
@@ -91,9 +98,13 @@
       <div class="row" style="margin-top:8px"><button id="dupBtn">Dupliquer</button><button id="delBtn">Supprimer</button></div>
     </div>
 
-    <h2>Éléments — clic pour sélectionner</h2>
-    <div class="hint" style="margin-bottom:5px">Pour ceux qui se chevauchent ou sont cachés sous un autre.</div>
-    <div class="vlist" id="elemList" style="max-height:200px;overflow:auto"></div>
+    <h2>Éléments</h2>
+    <div class="seg" style="margin-bottom:6px">
+      <button id="elemViewPage" class="on">Page actuelle</button>
+      <button id="elemViewAll">Toutes les pages</button>
+    </div>
+    <div class="hint" id="elemHint" style="margin-bottom:5px">Pour ceux qui se chevauchent ou sont cachés sous un autre.</div>
+    <div class="vlist" id="elemList" style="max-height:280px;overflow:auto"></div>
 
     <h2>Variantes enregistrées</h2>
     <div class="row"><input type="text" id="vName" placeholder="nom de la variante" style="flex:2"><button id="vSave">Enregistrer</button></div>
@@ -112,7 +123,7 @@
 <script>
 const GROUPS={text:'#cddd7a',btn:'#9fb0ab',temps:'#8e7bd6',derive:'#4bb58a',integrite:'#e0864a',reverbe:'#13add6'};
 const BASE_W=760, SNAP=5, PROJECT='Digitape';
-let data=null, S=0.85, curState=null, sel=null, mode='edit', snapOn=true;
+let data=null, S=0.85, curState=null, sel=null, mode='edit', snapOn=true, elemViewMode='page';
 let drag=null, hist={stack:[],idx:-1};
 
 const stage=document.getElementById('stage'), guidesEl=document.getElementById('guides');
@@ -121,6 +132,8 @@ const $=id=>document.getElementById(id);
 
 // ---------- boot ----------
 async function boot(){
+  // Plus de garde de version : migrate() réconcilie n'importe quelle vieille structure
+  // sur le SEED courant, donc l'autosave est toujours lu puis migré, jamais jeté.
   const saved=localStorage.getItem('spf.autosave.'+PROJECT);
   if(saved){ try{ data=JSON.parse(saved); }catch(e){} }
   if(!data){ try{ const r=await fetch('layout.json'); if(!r.ok)throw 0; data=await r.json(); }catch(e){ data=clone(SEED); } }
@@ -130,7 +143,11 @@ async function boot(){
   loadState(); resetHistory();
 }
 function clone(o){return JSON.parse(JSON.stringify(o));}
-const arr=v=>Array.isArray(v)?v:[];
+// Fusion proactive : repart TOUJOURS de la structure courante (SEED) et y ré-applique
+// les positions/tailles/labels de l'ancienne sauvegarde, par id. → une vieille sauvegarde
+// récupère automatiquement toute nouvelle structure (panneaux, labels, calque global, ancrage),
+// tout en gardant les réglages de l'utilisateur pour les éléments qui existent encore.
+const arr=v=>Array.isArray(v)?v:[]; // tolère tout ce qui n'est pas un vrai tableau (undefined, objet, null…)
 function migrate(d){
   const base=clone(SEED);
   const saved={};
@@ -181,7 +198,9 @@ function renderGraphic(){
   clearGuides(); clearStage();
   stage.style.background='linear-gradient(135deg,'+T('surfaceSky')+','+T('surfaceBlue')+')';
   facadeGhost();
+  // contrôles non-texte = fantômes (repères non interactifs)
   st().controls.forEach(c=>{ if(c.group==='text')return; const g=previewControl(c); g.style.pointerEvents='none'; g.style.opacity='.3'; stage.appendChild(g); });
+  // panneaux peints = éditables, rendus comme dans le plugin
   (st().zones||[]).forEach(z=>{
     const d=el('div'); d.style.position='absolute'; place(d,z); d.dataset.zone=z.id;
     if(z.kind==='panel'){
@@ -191,11 +210,13 @@ function renderGraphic(){
     if(sel&&sel.kind==='zone'&&sel.id===z.id)d.style.outline='2px solid #13add6';
     const h=el('div','zrh'); h.dataset.zrh=z.id; d.appendChild(h); stage.appendChild(d);
   });
+  // objets texte = éditables
   st().controls.forEach(c=>{ if(c.group!=='text')return; const d=el('div','box'+(sel&&sel.kind==='box'&&sel.id===c.id?' sel':'')); place(d,c); d.dataset.box=c.id; d.style.background='rgba(205,221,101,.55)'; d.style.color='#1a2a1e'; d.textContent=c.label||c.id; const h=el('div','rh'); h.dataset.rh=c.id; d.appendChild(h); stage.appendChild(d); });
-  gctrls().forEach(editBox);
+  gctrls().forEach(editBox); // calque global (barre infobulle + boutons ancrés)
 }
 function renderList(){
   const L=$('elemList'); if(!L) return; L.innerHTML='';
+  if(elemViewMode==='all'){ renderListAll(L); return; }
   const rows=[];
   (st().zones||[]).forEach(z=>rows.push({kind:'zone',o:z,col:'#3a5c55',tag:'zone'}));
   st().controls.forEach(c=>rows.push({kind:'box',o:c,col:GROUPS[c.group]||'#888',tag:c.group}));
@@ -209,12 +230,60 @@ function renderList(){
     L.appendChild(it);
   });
 }
+// Vue "toutes les pages" : un groupe par fenêtre, glisser-déposer entre groupes pour réassigner un contrôle
+function renderListAll(L){
+  let dragCid=null, dragFrom=null;
+  for(const sk in data.states){
+    const st2=data.states[sk];
+    const head=el('div','grpHead'); head.textContent=(st2.label||sk)+' ('+(st2.controls||[]).length+')'; L.appendChild(head);
+    const zone=el('div','dropzone'); zone.dataset.state=sk;
+    zone.addEventListener('dragover',e=>{ if(dragCid===null)return; e.preventDefault(); zone.classList.add('over'); });
+    zone.addEventListener('dragleave',()=>zone.classList.remove('over'));
+    zone.addEventListener('drop',e=>{
+      e.preventDefault(); zone.classList.remove('over');
+      if(dragCid===null || dragFrom===sk)return;
+      if(moveControlToState(dragCid,dragFrom,sk)){ pushHistory(); render(); showSel(); }
+    });
+    (st2.controls||[]).forEach(c=>{
+      const it=el('div','vitem'); it.draggable=true;
+      if(sel&&sel.kind==='box'&&sel.id===c.id&&curState===sk){it.style.borderColor='#fff';it.style.background='#1b3a40';}
+      it.innerHTML='<i class="dot" style="background:'+(GROUPS[c.group]||'#888')+'"></i><span title="'+esc(c.id)+'">'+esc(c.label||c.id)+'</span>';
+      it.addEventListener('dragstart',e=>{ dragCid=c.id; dragFrom=sk; it.classList.add('dragging'); e.dataTransfer.setData('text/plain',c.id); e.dataTransfer.effectAllowed='move'; });
+      it.addEventListener('dragend',()=>{ it.classList.remove('dragging'); dragCid=null; dragFrom=null; });
+      it.onclick=()=>{ if(curState!==sk){curState=sk; stateSel.value=sk; loadState();} else { if(mode!=='edit')setMode('edit'); } sel={kind:'box',id:c.id}; render(); showSel(); };
+      zone.appendChild(it);
+    });
+    L.appendChild(zone);
+  }
+  const g=gctrls();
+  if(g.length){
+    const head=el('div','grpHead'); head.textContent='Global — toutes les fenêtres ('+g.length+')'; L.appendChild(head);
+    g.forEach(c=>{
+      const it=el('div','vitem global');
+      it.innerHTML='<i class="dot" style="background:'+(GROUPS[c.group]||'#888')+'"></i><span title="'+esc(c.id)+'">'+esc(c.label||c.id)+'</span>';
+      L.appendChild(it);
+    });
+  }
+}
+// Déplace un contrôle d'un état vers un autre (conserve position/label/groupe). Retourne true si trouvé et déplacé.
+function moveControlToState(controlId, fromKey, toKey){
+  const from=data.states[fromKey], to=data.states[toKey];
+  if(!from||!to||!Array.isArray(from.controls)||!Array.isArray(to.controls))return false;
+  const idx=from.controls.findIndex(c=>c.id===controlId);
+  if(idx<0)return false;
+  const [c]=from.controls.splice(idx,1);
+  to.controls.push(c);
+  return true;
+}
+// Résout un élément (ancré ou non) en rectangle base {x,y,w,h} selon la hauteur courante
 function R(o){const H=st().height;
   if(o.anchor==='br')        return {x:BASE_W-o.right, y:H-o.bottom, w:o.w, h:o.h};
   if(o.anchor==='bottombar') return {x:0, y:H-o.bottom, w:BASE_W, h:o.h};
   return {x:o.x, y:o.y, w:o.w, h:o.h};
 }
 function gctrls(){return (data.global&&data.global.controls)||[];}
+// Fantôme non-interactif de la façade, affiché en fond sur les onglets avancés (repère visuel,
+// pas éditable depuis là — la façade se modifie seulement dans son propre état).
 function facadeGhost(){
   if(curState==='facade')return;
   const fc=(data.states.facade&&data.states.facade.controls)||[];
@@ -248,7 +317,7 @@ function renderEdit(){
     d.innerHTML='<span class="zl">'+esc(z.label||z.id)+'</span>';const h=el('div','zrh');h.dataset.zrh=z.id;d.appendChild(h);stage.appendChild(d);
   });
   st().controls.forEach(editBox);
-  gctrls().forEach(editBox);
+  gctrls().forEach(editBox); // calque global (ancré) sur toutes les fenêtres
 }
 
 function renderPreview(){
@@ -289,13 +358,13 @@ function previewControl(c){
     d.innerHTML='<svg width="'+w+'" height="'+h+'"><line x1="'+w/2+'" y1="3" x2="'+w/2+'" y2="'+(h-3)+'" stroke="'+rgba('textMuted',.5)+'" stroke-width="3"/>'
       +'<line x1="'+w/2+'" y1="'+(h*0.4)+'" x2="'+w/2+'" y2="'+(h-3)+'" stroke="'+T('teal')+'" stroke-width="3"/>'
       +'<circle cx="'+w/2+'" cy="'+(h*0.4)+'" r="'+Math.min(6,w*0.4)+'" fill="'+T('accent')+'"/></svg>';
-  }else if(ty==='tooltipbar'){
+  }else if(ty==='tooltipbar'){ // barre infobulle — même style que le vrai paint() : fond clair + séparateur haut
     d.style.background=T('surfaceBar');
     d.style.borderTop='1px solid '+rgba('textMuted',.28);
     d.style.display='flex';d.style.alignItems='center';
     d.style.color=rgba('textMuted',.5);d.style.fontSize='9px';d.style.paddingLeft='10px';
     d.textContent='Survoler un paramètre pour voir sa description';
-  }else{
+  }else{ // display / canvas
     d.style.background=T('bgDeep');d.style.border='1px solid '+rgba('accent',.35);d.style.borderRadius='4px';
     d.style.display='flex';d.style.alignItems='center';d.style.justifyContent='center';
     d.style.color=rgba('accent',.75);d.style.fontSize='9px';d.textContent=c.label||'';
@@ -309,7 +378,7 @@ function typeOf(c){
   if(TYPEMAP[c.id])return TYPEMAP[c.id];
   if(c.group==='paint')return 'tooltipbar';
   if(c.group==='text'||/Label$/.test(c.id))return 'label';
-  if(/Btn$/.test(c.id))return 'button';
+  if(/Btn$/.test(c.id))return c.group==='air'?'pill':'button';
   if(/Slider$/.test(c.id)){ if(c.w>=2.2*c.h)return 'hslider'; if(c.h>=1.7*c.w)return 'vslider'; return 'knob'; }
   return 'display';
 }
@@ -425,6 +494,17 @@ $('modeGraphic').addEventListener('click',()=>setMode('graphic'));
 $('modePreview').addEventListener('click',()=>setMode('preview'));
 function setMode(m){mode=m;$('modeEdit').classList.toggle('on',m==='edit');$('modeGraphic').classList.toggle('on',m==='graphic');$('modePreview').classList.toggle('on',m==='preview');clearGuides();render();}
 $('snapBtn').addEventListener('click',()=>$('snapBtn').classList.toggle('on'));
+$('elemViewPage').addEventListener('click',()=>setElemView('page'));
+$('elemViewAll').addEventListener('click',()=>setElemView('all'));
+function setElemView(v){
+  elemViewMode=v;
+  $('elemViewPage').classList.toggle('on',v==='page');
+  $('elemViewAll').classList.toggle('on',v==='all');
+  $('elemHint').textContent = v==='page'
+    ? 'Pour ceux qui se chevauchent ou sont cachés sous un autre.'
+    : 'Glisse un élément d\'un groupe à l\'autre pour le déplacer vers cette page.';
+  renderList();
+}
 $('undoBtn').addEventListener('click',undo);$('redoBtn').addEventListener('click',redo);
 
 // ---------- state / height ----------

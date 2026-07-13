@@ -34,6 +34,11 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
 
     setupKnob (bitcrushAmountKnob,   "bitcrushAmount",   "Bitcrush");
     setupKnob (decimationAmountKnob, "decimationAmount", "Decimation");
+    setupKnob (reverbPreDelayKnob,   "reverbPreDelay",   "Reverbe predelai");
+    setupKnob (reverbTransientKnob,  "reverbTransient",  "Reverbe transient");
+    setupKnob (reverbHighpassKnob,   "reverbHighpass",   "Reverbe HP");
+    setupKnob (reverbLowpassKnob,    "reverbLowpass",    "Reverbe LP");
+    setupKnob (reverbBrightnessKnob, "reverbBrightness", "Reverbe bright.");
 
     syncNoteCombo.addItemList ({ "1/32", "1/16", "1/8", "1/4", "1/2", "1/1" }, 1);
     addAndMakeVisible (syncNoteCombo);
@@ -103,8 +108,13 @@ void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
 
     bitcrushAmountKnob.slider.setVisible (shouldShow);   bitcrushAmountKnob.label.setVisible (shouldShow);
     decimationAmountKnob.slider.setVisible (shouldShow); decimationAmountKnob.label.setVisible (shouldShow);
+    reverbPreDelayKnob.slider.setVisible (shouldShow);   reverbPreDelayKnob.label.setVisible (shouldShow);
+    reverbTransientKnob.slider.setVisible (shouldShow);  reverbTransientKnob.label.setVisible (shouldShow);
+    reverbHighpassKnob.slider.setVisible (shouldShow);   reverbHighpassKnob.label.setVisible (shouldShow);
+    reverbLowpassKnob.slider.setVisible (shouldShow);    reverbLowpassKnob.label.setVisible (shouldShow);
+    reverbBrightnessKnob.slider.setVisible (shouldShow); reverbBrightnessKnob.label.setVisible (shouldShow);
 
-    setSize (760, shouldShow ? 200 : 460);
+    setSize (760, shouldShow ? 280 : 460);
 }
 
 //==============================================================================
@@ -139,6 +149,11 @@ void DigitapeAudioProcessorEditor::resized()
 
     placeKnob (bitcrushAmountKnob,   UI::ctrl::advanced::bitcrushAmountSlider.x,   UI::ctrl::advanced::bitcrushAmountSlider.y,   UI::ctrl::advanced::bitcrushAmountSlider.w,   UI::ctrl::advanced::bitcrushAmountSlider.h);
     placeKnob (decimationAmountKnob, UI::ctrl::advanced::decimationAmountSlider.x, UI::ctrl::advanced::decimationAmountSlider.y, UI::ctrl::advanced::decimationAmountSlider.w, UI::ctrl::advanced::decimationAmountSlider.h);
+    placeKnob (reverbPreDelayKnob,   UI::ctrl::advanced::reverbPreDelaySlider.x,   UI::ctrl::advanced::reverbPreDelaySlider.y,   UI::ctrl::advanced::reverbPreDelaySlider.w,   UI::ctrl::advanced::reverbPreDelaySlider.h);
+    placeKnob (reverbTransientKnob,  UI::ctrl::advanced::reverbTransientSlider.x,  UI::ctrl::advanced::reverbTransientSlider.y,  UI::ctrl::advanced::reverbTransientSlider.w,  UI::ctrl::advanced::reverbTransientSlider.h);
+    placeKnob (reverbHighpassKnob,   UI::ctrl::advanced::reverbHighpassSlider.x,   UI::ctrl::advanced::reverbHighpassSlider.y,   UI::ctrl::advanced::reverbHighpassSlider.w,   UI::ctrl::advanced::reverbHighpassSlider.h);
+    placeKnob (reverbLowpassKnob,    UI::ctrl::advanced::reverbLowpassSlider.x,    UI::ctrl::advanced::reverbLowpassSlider.y,    UI::ctrl::advanced::reverbLowpassSlider.w,    UI::ctrl::advanced::reverbLowpassSlider.h);
+    placeKnob (reverbBrightnessKnob, UI::ctrl::advanced::reverbBrightnessSlider.x, UI::ctrl::advanced::reverbBrightnessSlider.y, UI::ctrl::advanced::reverbBrightnessSlider.w, UI::ctrl::advanced::reverbBrightnessSlider.h);
 
     syncNoteCombo.setBounds   ((int) UI::ctrl::facade::syncNoteCombo.x,   (int) UI::ctrl::facade::syncNoteCombo.y,   (int) UI::ctrl::facade::syncNoteCombo.w,   (int) UI::ctrl::facade::syncNoteCombo.h);
     syncFlavorCombo.setBounds ((int) UI::ctrl::facade::syncFlavorCombo.x, (int) UI::ctrl::facade::syncFlavorCombo.y, (int) UI::ctrl::facade::syncFlavorCombo.w, (int) UI::ctrl::facade::syncFlavorCombo.h);
