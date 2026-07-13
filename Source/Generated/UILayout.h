@@ -35,13 +35,13 @@ namespace UI
             constexpr Rect reverbMixSlider        {  275.0f,  155.0f,   90.0f,   90.0f };
             constexpr Rect monoBtn                {  570.0f,  436.0f,   90.0f,   24.0f };
             constexpr Rect safetyBtn              {  670.0f,  436.0f,   90.0f,   24.0f };
+            constexpr Rect syncNoteCombo          {  580.0f,  120.0f,  140.0f,   28.0f };
+            constexpr Rect syncFlavorCombo        {  580.0f,  160.0f,  140.0f,   28.0f };
         }
         namespace advanced
         {
             constexpr Rect bitcrushAmountSlider   {   40.0f,   50.0f,   90.0f,   90.0f };
             constexpr Rect decimationAmountSlider {  170.0f,   50.0f,   90.0f,   90.0f };
-            constexpr Rect syncNoteCombo          {  323.0f,   10.0f,  140.0f,   28.0f };
-            constexpr Rect syncFlavorCombo        {  479.0f,   10.0f,  140.0f,   28.0f };
         }
     }
 

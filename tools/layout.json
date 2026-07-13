@@ -25,7 +25,9 @@
         { "id": "reverbCharacterSlider", "label": "Reverbe caract.", "group": "reverbe", "x": 380, "y": 50, "w": 90, "h": 90 },
         { "id": "reverbMixSlider", "label": "Reverbe mix", "group": "reverbe", "x": 275, "y": 155, "w": 90, "h": 90 },
         { "id": "monoBtn", "label": "Mono", "group": "btn", "x": 570, "y": 436, "w": 90, "h": 24 },
-        { "id": "safetyBtn", "label": "Sécurité", "group": "btn", "x": 670, "y": 436, "w": 90, "h": 24 }
+        { "id": "safetyBtn", "label": "Sécurité", "group": "btn", "x": 670, "y": 436, "w": 90, "h": 24 },
+        { "id": "syncNoteCombo", "label": "Sync division", "group": "temps", "x": 580, "y": 120, "w": 140, "h": 28 },
+        { "id": "syncFlavorCombo", "label": "Sync saveur", "group": "temps", "x": 580, "y": 160, "w": 140, "h": 28 }
       ]
     },
     "advanced": {
@@ -34,9 +36,7 @@
       "zones": [],
       "controls": [
         { "id": "bitcrushAmountSlider", "label": "Bitcrush", "group": "integrite", "x": 40, "y": 50, "w": 90, "h": 90 },
-        { "id": "decimationAmountSlider", "label": "Decimation", "group": "integrite", "x": 170, "y": 50, "w": 90, "h": 90 },
-        { "id": "syncNoteCombo", "label": "Sync division", "group": "temps", "x": 323, "y": 10, "w": 140, "h": 28 },
-        { "id": "syncFlavorCombo", "label": "Sync saveur", "group": "temps", "x": 479, "y": 10, "w": 140, "h": 28 }
+        { "id": "decimationAmountSlider", "label": "Decimation", "group": "integrite", "x": 170, "y": 50, "w": 90, "h": 90 }
       ]
     }
   },

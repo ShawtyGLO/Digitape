@@ -98,11 +98,11 @@ void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
     monoButton.setVisible (!shouldShow);
     safetyButton.setVisible (!shouldShow);
     titleLabel.setVisible (!shouldShow);
+    syncNoteCombo.setVisible (!shouldShow);
+    syncFlavorCombo.setVisible (!shouldShow);
 
     bitcrushAmountKnob.slider.setVisible (shouldShow);   bitcrushAmountKnob.label.setVisible (shouldShow);
     decimationAmountKnob.slider.setVisible (shouldShow); decimationAmountKnob.label.setVisible (shouldShow);
-    syncNoteCombo.setVisible (shouldShow);
-    syncFlavorCombo.setVisible (shouldShow);
 
     setSize (760, shouldShow ? 200 : 460);
 }
@@ -140,6 +140,6 @@ void DigitapeAudioProcessorEditor::resized()
     placeKnob (bitcrushAmountKnob,   UI::ctrl::advanced::bitcrushAmountSlider.x,   UI::ctrl::advanced::bitcrushAmountSlider.y,   UI::ctrl::advanced::bitcrushAmountSlider.w,   UI::ctrl::advanced::bitcrushAmountSlider.h);
     placeKnob (decimationAmountKnob, UI::ctrl::advanced::decimationAmountSlider.x, UI::ctrl::advanced::decimationAmountSlider.y, UI::ctrl::advanced::decimationAmountSlider.w, UI::ctrl::advanced::decimationAmountSlider.h);
 
-    syncNoteCombo.setBounds   ((int) UI::ctrl::advanced::syncNoteCombo.x,   (int) UI::ctrl::advanced::syncNoteCombo.y,   (int) UI::ctrl::advanced::syncNoteCombo.w,   (int) UI::ctrl::advanced::syncNoteCombo.h);
-    syncFlavorCombo.setBounds ((int) UI::ctrl::advanced::syncFlavorCombo.x, (int) UI::ctrl::advanced::syncFlavorCombo.y, (int) UI::ctrl::advanced::syncFlavorCombo.w, (int) UI::ctrl::advanced::syncFlavorCombo.h);
+    syncNoteCombo.setBounds   ((int) UI::ctrl::facade::syncNoteCombo.x,   (int) UI::ctrl::facade::syncNoteCombo.y,   (int) UI::ctrl::facade::syncNoteCombo.w,   (int) UI::ctrl::facade::syncNoteCombo.h);
+    syncFlavorCombo.setBounds ((int) UI::ctrl::facade::syncFlavorCombo.x, (int) UI::ctrl::facade::syncFlavorCombo.y, (int) UI::ctrl::facade::syncFlavorCombo.w, (int) UI::ctrl::facade::syncFlavorCombo.h);
 }
