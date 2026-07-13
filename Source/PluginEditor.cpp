@@ -1,10 +1,17 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Generated/UILayout.h"
+#include "Generated/ThemeColors.g.h"
 
 //==============================================================================
 DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
+    titleLabel.setText ("DIGITAPE", juce::dontSendNotification);
+    titleLabel.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+    titleLabel.setColour (juce::Label::textColourId, Theme::textPrimary);
+    addAndMakeVisible (titleLabel);
+
     setupKnob (timeKnob,       "time",       "Temps");
     setupKnob (feedbackKnob,   "feedback",   "Reinjection");
     setupKnob (mixKnob,        "mix",        "Mix");
@@ -13,13 +20,20 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     setupKnob (widthKnob,      "width",      "Largeur");
     setupKnob (driftShapeKnob, "driftShape", "Derive forme");
     setupKnob (integrityKnob,  "integrity",  "Integrite");
-    setupKnob (bitcrushAmountKnob,   "bitcrushAmount",   "Bitcrush (adv)");
-    setupKnob (decimationAmountKnob, "decimationAmount", "Decimation (adv)");
-    setupKnob (wetGainKnob, "wetGain", "Niv. repet.");
+    setupKnob (wetGainKnob,    "wetGain",    "Niv. repet.");
     setupKnob (syncAmountKnob, "syncAmount", "Sync accroche");
-    setupKnob (reverbSizeKnob, "reverbSize", "Reverbe taille");
+    setupKnob (reverbSizeKnob,      "reverbSize",      "Reverbe taille");
     setupKnob (reverbCharacterKnob, "reverbCharacter", "Reverbe caract.");
-    setupKnob (reverbMixKnob, "reverbMix", "Reverbe mix");
+    setupKnob (reverbMixKnob,       "reverbMix",       "Reverbe mix");
+
+    addAndMakeVisible (monoButton);
+    monoAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "mono", monoButton);
+
+    addAndMakeVisible (safetyButton);
+    safetyAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "safety", safetyButton);
+
+    setupKnob (bitcrushAmountKnob,   "bitcrushAmount",   "Bitcrush");
+    setupKnob (decimationAmountKnob, "decimationAmount", "Decimation");
 
     syncNoteCombo.addItemList ({ "1/32", "1/16", "1/8", "1/4", "1/2", "1/1" }, 1);
     addAndMakeVisible (syncNoteCombo);
@@ -29,13 +43,12 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     addAndMakeVisible (syncFlavorCombo);
     syncFlavorAttachment = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, "syncFlavor", syncFlavorCombo);
 
-    addAndMakeVisible (monoButton);
-    monoAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "mono", monoButton);
+    addAndMakeVisible (advancedToggle);
+    advancedToggle.setClickingTogglesState (true);
+    advancedToggle.onClick = [this] { setShowingAdvanced (advancedToggle.getToggleState()); };
 
-    addAndMakeVisible (safetyButton);
-    safetyAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "safety", safetyButton);
-
-    setSize (1620, 220);
+    setShowingAdvanced (false);
+    setSize (760, 460);
 }
 
 DigitapeAudioProcessorEditor::~DigitapeAudioProcessorEditor()
@@ -49,45 +62,84 @@ void DigitapeAudioProcessorEditor::setupKnob (KnobWithLabel& knob, const juce::S
 
     knob.label.setText (labelText, juce::dontSendNotification);
     knob.label.setJustificationType (juce::Justification::centred);
+    knob.label.setFont (juce::FontOptions (11.0f));
+    knob.label.setColour (juce::Label::textColourId, Theme::textMuted);
     addAndMakeVisible (knob.label);
+}
+
+void DigitapeAudioProcessorEditor::placeKnob (KnobWithLabel& knob, float x, float y, float w, float h)
+{
+    // Legende integree dans le bas du rectangle du rangement : reste toujours dans
+    // ses bornes quelle que soit sa position sur la facade (pres du bord haut/bas).
+    const int ix = (int) x, iy = (int) y, iw = (int) w, ih = (int) h;
+    const int labelH = 16;
+    knob.slider.setBounds (ix, iy, iw, ih - labelH);
+    knob.label.setBounds (ix, iy + ih - labelH, iw, labelH);
+}
+
+void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
+{
+    showingAdvanced = shouldShow;
+    advancedToggle.setButtonText (shouldShow ? "< Facade" : "Advanced");
+
+    timeKnob.slider.setVisible (!shouldShow);       timeKnob.label.setVisible (!shouldShow);
+    feedbackKnob.slider.setVisible (!shouldShow);   feedbackKnob.label.setVisible (!shouldShow);
+    mixKnob.slider.setVisible (!shouldShow);        mixKnob.label.setVisible (!shouldShow);
+    driftRateKnob.slider.setVisible (!shouldShow);  driftRateKnob.label.setVisible (!shouldShow);
+    driftDepthKnob.slider.setVisible (!shouldShow); driftDepthKnob.label.setVisible (!shouldShow);
+    widthKnob.slider.setVisible (!shouldShow);      widthKnob.label.setVisible (!shouldShow);
+    driftShapeKnob.slider.setVisible (!shouldShow); driftShapeKnob.label.setVisible (!shouldShow);
+    integrityKnob.slider.setVisible (!shouldShow);  integrityKnob.label.setVisible (!shouldShow);
+    wetGainKnob.slider.setVisible (!shouldShow);    wetGainKnob.label.setVisible (!shouldShow);
+    syncAmountKnob.slider.setVisible (!shouldShow); syncAmountKnob.label.setVisible (!shouldShow);
+    reverbSizeKnob.slider.setVisible (!shouldShow);      reverbSizeKnob.label.setVisible (!shouldShow);
+    reverbCharacterKnob.slider.setVisible (!shouldShow); reverbCharacterKnob.label.setVisible (!shouldShow);
+    reverbMixKnob.slider.setVisible (!shouldShow);       reverbMixKnob.label.setVisible (!shouldShow);
+    monoButton.setVisible (!shouldShow);
+    safetyButton.setVisible (!shouldShow);
+    titleLabel.setVisible (!shouldShow);
+
+    bitcrushAmountKnob.slider.setVisible (shouldShow);   bitcrushAmountKnob.label.setVisible (shouldShow);
+    decimationAmountKnob.slider.setVisible (shouldShow); decimationAmountKnob.label.setVisible (shouldShow);
+    syncNoteCombo.setVisible (shouldShow);
+    syncFlavorCombo.setVisible (shouldShow);
+
+    setSize (760, shouldShow ? 200 : 460);
 }
 
 //==============================================================================
 void DigitapeAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
-
-    g.setColour (juce::Colours::white);
-    g.setFont (juce::FontOptions (16.0f));
-    g.drawFittedText ("Digitape - Moteur temps (v0)", getLocalBounds().removeFromTop (24),
-                       juce::Justification::centred, 1);
+    g.fillAll (Theme::bgDeep);
 }
 
 void DigitapeAudioProcessorEditor::resized()
 {
-    auto area = getLocalBounds().withTrimmedTop (28).reduced (12);
+    advancedToggle.setBounds (getWidth() - 100, 8, 80, 22);
 
-    KnobWithLabel* knobs[] = { &timeKnob, &feedbackKnob, &mixKnob, &driftRateKnob, &driftDepthKnob, &widthKnob, &driftShapeKnob,
-                               &integrityKnob, &bitcrushAmountKnob, &decimationAmountKnob, &wetGainKnob, &syncAmountKnob,
-                               &reverbSizeKnob, &reverbCharacterKnob, &reverbMixKnob };
-    const int numKnobs = (int) std::size (knobs);
-    const int columnWidth = area.getWidth() / numKnobs;
+    titleLabel.setBounds ((int) UI::ctrl::facade::titleLabel.x, (int) UI::ctrl::facade::titleLabel.y,
+                           (int) UI::ctrl::facade::titleLabel.w, (int) UI::ctrl::facade::titleLabel.h);
 
-    for (int i = 0; i < numKnobs; ++i)
-    {
-        auto column = area.removeFromLeft (columnWidth);
-        knobs[i]->label.setBounds (column.removeFromTop (20));
+    placeKnob (timeKnob,       UI::ctrl::facade::timeSlider.x,       UI::ctrl::facade::timeSlider.y,       UI::ctrl::facade::timeSlider.w,       UI::ctrl::facade::timeSlider.h);
+    placeKnob (feedbackKnob,   UI::ctrl::facade::feedbackSlider.x,   UI::ctrl::facade::feedbackSlider.y,   UI::ctrl::facade::feedbackSlider.w,   UI::ctrl::facade::feedbackSlider.h);
+    placeKnob (mixKnob,        UI::ctrl::facade::mixSlider.x,        UI::ctrl::facade::mixSlider.y,        UI::ctrl::facade::mixSlider.w,        UI::ctrl::facade::mixSlider.h);
+    placeKnob (driftRateKnob,  UI::ctrl::facade::driftRateSlider.x,  UI::ctrl::facade::driftRateSlider.y,  UI::ctrl::facade::driftRateSlider.w,  UI::ctrl::facade::driftRateSlider.h);
+    placeKnob (driftDepthKnob, UI::ctrl::facade::driftDepthSlider.x, UI::ctrl::facade::driftDepthSlider.y, UI::ctrl::facade::driftDepthSlider.w, UI::ctrl::facade::driftDepthSlider.h);
+    placeKnob (widthKnob,      UI::ctrl::facade::widthSlider.x,      UI::ctrl::facade::widthSlider.y,      UI::ctrl::facade::widthSlider.w,      UI::ctrl::facade::widthSlider.h);
+    placeKnob (driftShapeKnob, UI::ctrl::facade::driftShapeSlider.x, UI::ctrl::facade::driftShapeSlider.y, UI::ctrl::facade::driftShapeSlider.w, UI::ctrl::facade::driftShapeSlider.h);
+    placeKnob (integrityKnob,  UI::ctrl::facade::integritySlider.x,  UI::ctrl::facade::integritySlider.y,  UI::ctrl::facade::integritySlider.w,  UI::ctrl::facade::integritySlider.h);
+    placeKnob (wetGainKnob,    UI::ctrl::facade::wetGainSlider.x,    UI::ctrl::facade::wetGainSlider.y,    UI::ctrl::facade::wetGainSlider.w,    UI::ctrl::facade::wetGainSlider.h);
+    placeKnob (syncAmountKnob, UI::ctrl::facade::syncAmountSlider.x, UI::ctrl::facade::syncAmountSlider.y, UI::ctrl::facade::syncAmountSlider.w, UI::ctrl::facade::syncAmountSlider.h);
+    placeKnob (reverbSizeKnob,      UI::ctrl::facade::reverbSizeSlider.x,      UI::ctrl::facade::reverbSizeSlider.y,      UI::ctrl::facade::reverbSizeSlider.w,      UI::ctrl::facade::reverbSizeSlider.h);
+    placeKnob (reverbCharacterKnob, UI::ctrl::facade::reverbCharacterSlider.x, UI::ctrl::facade::reverbCharacterSlider.y, UI::ctrl::facade::reverbCharacterSlider.w, UI::ctrl::facade::reverbCharacterSlider.h);
+    placeKnob (reverbMixKnob,       UI::ctrl::facade::reverbMixSlider.x,       UI::ctrl::facade::reverbMixSlider.y,       UI::ctrl::facade::reverbMixSlider.w,       UI::ctrl::facade::reverbMixSlider.h);
 
-        if (knobs[i] == &widthKnob)
-            monoButton.setBounds (column.removeFromBottom (24));
-        else if (knobs[i] == &integrityKnob)
-            safetyButton.setBounds (column.removeFromBottom (24));
-        else if (knobs[i] == &syncAmountKnob)
-        {
-            syncFlavorCombo.setBounds (column.removeFromBottom (22));
-            syncNoteCombo.setBounds (column.removeFromBottom (22));
-        }
+    monoButton.setBounds   ((int) UI::ctrl::facade::monoBtn.x,   (int) UI::ctrl::facade::monoBtn.y,   (int) UI::ctrl::facade::monoBtn.w,   (int) UI::ctrl::facade::monoBtn.h);
+    safetyButton.setBounds ((int) UI::ctrl::facade::safetyBtn.x, (int) UI::ctrl::facade::safetyBtn.y, (int) UI::ctrl::facade::safetyBtn.w, (int) UI::ctrl::facade::safetyBtn.h);
 
-        knobs[i]->slider.setBounds (column.reduced (6));
-    }
+    placeKnob (bitcrushAmountKnob,   UI::ctrl::advanced::bitcrushAmountSlider.x,   UI::ctrl::advanced::bitcrushAmountSlider.y,   UI::ctrl::advanced::bitcrushAmountSlider.w,   UI::ctrl::advanced::bitcrushAmountSlider.h);
+    placeKnob (decimationAmountKnob, UI::ctrl::advanced::decimationAmountSlider.x, UI::ctrl::advanced::decimationAmountSlider.y, UI::ctrl::advanced::decimationAmountSlider.w, UI::ctrl::advanced::decimationAmountSlider.h);
+
+    syncNoteCombo.setBounds   ((int) UI::ctrl::advanced::syncNoteCombo.x,   (int) UI::ctrl::advanced::syncNoteCombo.y,   (int) UI::ctrl::advanced::syncNoteCombo.w,   (int) UI::ctrl::advanced::syncNoteCombo.h);
+    syncFlavorCombo.setBounds ((int) UI::ctrl::advanced::syncFlavorCombo.x, (int) UI::ctrl::advanced::syncFlavorCombo.y, (int) UI::ctrl::advanced::syncFlavorCombo.w, (int) UI::ctrl::advanced::syncFlavorCombo.h);
 }

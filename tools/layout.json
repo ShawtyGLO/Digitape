@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "baseWidth": 760,
+    "note": "Source de vérité du layout de Digitape, en coordonnées de base (avant scale). Édité via tools/plugin-factory.html. Sert à régénérer Source/Generated/UILayout.h.",
+    "generatedFrom": "Rangement par module puis reorganisation manuelle par l'utilisateur dans Plugin Factory, 2026-07-12"
+  },
+  "states": {
+    "facade": {
+      "label": "Façade (toujours visible)",
+      "height": 460,
+      "zones": [],
+      "controls": [
+        { "id": "titleLabel", "label": "DIGITAPE", "group": "text", "x": 20, "y": 10, "w": 300, "h": 22 },
+        { "id": "timeSlider", "label": "Temps", "group": "temps", "x": 30, "y": 50, "w": 90, "h": 90 },
+        { "id": "feedbackSlider", "label": "Réinjection", "group": "temps", "x": 135, "y": 50, "w": 90, "h": 90 },
+        { "id": "mixSlider", "label": "Mix", "group": "temps", "x": 670, "y": 5, "w": 90, "h": 90 },
+        { "id": "driftRateSlider", "label": "Dérive freq", "group": "derive", "x": 135, "y": 370, "w": 90, "h": 90 },
+        { "id": "driftDepthSlider", "label": "Dérive prof.", "group": "derive", "x": 238, "y": 370, "w": 90, "h": 90 },
+        { "id": "driftShapeSlider", "label": "Dérive forme", "group": "derive", "x": 344, "y": 370, "w": 90, "h": 90 },
+        { "id": "widthSlider", "label": "Largeur", "group": "derive", "x": 570, "y": 346, "w": 90, "h": 90 },
+        { "id": "integritySlider", "label": "Intégrité", "group": "integrite", "x": 380, "y": 245, "w": 90, "h": 90 },
+        { "id": "wetGainSlider", "label": "Niv. répét.", "group": "temps", "x": 30, "y": 155, "w": 90, "h": 90 },
+        { "id": "syncAmountSlider", "label": "Sync accroche", "group": "temps", "x": 30, "y": 266, "w": 90, "h": 90 },
+        { "id": "reverbSizeSlider", "label": "Reverbe taille", "group": "reverbe", "x": 275, "y": 50, "w": 90, "h": 90 },
+        { "id": "reverbCharacterSlider", "label": "Reverbe caract.", "group": "reverbe", "x": 380, "y": 50, "w": 90, "h": 90 },
+        { "id": "reverbMixSlider", "label": "Reverbe mix", "group": "reverbe", "x": 275, "y": 155, "w": 90, "h": 90 },
+        { "id": "monoBtn", "label": "Mono", "group": "btn", "x": 570, "y": 436, "w": 90, "h": 24 },
+        { "id": "safetyBtn", "label": "Sécurité", "group": "btn", "x": 670, "y": 436, "w": 90, "h": 24 }
+      ]
+    },
+    "advanced": {
+      "label": "Advanced (panneau déplié)",
+      "height": 200,
+      "zones": [],
+      "controls": [
+        { "id": "bitcrushAmountSlider", "label": "Bitcrush", "group": "integrite", "x": 40, "y": 50, "w": 90, "h": 90 },
+        { "id": "decimationAmountSlider", "label": "Decimation", "group": "integrite", "x": 170, "y": 50, "w": 90, "h": 90 },
+        { "id": "syncNoteCombo", "label": "Sync division", "group": "temps", "x": 323, "y": 10, "w": 140, "h": 28 },
+        { "id": "syncFlavorCombo", "label": "Sync saveur", "group": "temps", "x": 479, "y": 10, "w": 140, "h": 28 }
+      ]
+    }
+  },
+  "global": {
+    "note": "Éléments toujours visibles, ancrés à un bord — présents sur toutes les fenêtres.",
+    "controls": []
+  }
+}

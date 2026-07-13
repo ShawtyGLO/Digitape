@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "note": "Source de vérité du thème de Digitape (couleurs, plus tard polices). Repris tel quel du thème InvisibleFix comme point de départ - aucune identité visuelle propre a Digitape definie pour l'instant. Édité via tools/plugin-factory.html. Sert à régénérer Source/Generated/ThemeColors.g.h.",
+    "hexFormat": "ARGB 8 chiffres, sans préfixe 0x"
+  },
+  "colors": {
+    "accent":        { "hex": "FF13ADD6", "note": "cyan principal" },
+    "teal":          { "hex": "FF1BB89E", "note": "teal secondaire" },
+    "textMuted":     { "hex": "FF94A5A2", "note": "gris-vert labels" },
+    "textPrimary":   { "hex": "FFCDDDD9", "note": "texte clair sur fond sombre" },
+    "textDark":      { "hex": "FF26332F", "note": "texte sombre sur fond clair" },
+    "textSecondary": { "hex": "FF4A6660", "note": "texte discret (desc. tooltip)" },
+    "ink":           { "hex": "FF060514", "note": "quasi-noir (texte sur boutons accent)" },
+    "danger":        { "hex": "FFFF3333", "note": "rouge bypass/off" },
+    "dangerSoft":    { "hex": "FFE05050", "note": "rouge adouci" },
+    "amberWarn":     { "hex": "FFE8A000", "note": "ambre alerte" },
+    "gold":          { "hex": "FFF0C040", "note": "doré" },
+    "surfaceLight":   { "hex": "FFE4F0EE", "note": "panneau/preset clair" },
+    "surfaceLighter": { "hex": "FFF0FAFC", "note": "surface très claire" },
+    "surfaceBar":     { "hex": "FFD4E8E4", "note": "barre preset/tooltip" },
+    "surfaceBlue":    { "hex": "FFDDEAF0", "note": "surface bleutée" },
+    "surfaceSky":     { "hex": "FFEBF4F7", "note": "ciel clair" },
+    "bgDeep":        { "hex": "FF0D1A1E", "note": "fond profond" },
+    "panelDark":     { "hex": "FF1E3330", "note": "panneau sombre" },
+    "black":         { "hex": "FF000000", "note": "noir" },
+    "white":         { "hex": "FFFFFFFF", "note": "blanc" },
+    "scrim":         { "hex": "22000000", "note": "noir translucide (overlay/ombre)" }
+  },
+  "fonts": {
+    "family": "default",
+    "note": "Famille et rôles à centraliser plus tard."
+  }
+}
