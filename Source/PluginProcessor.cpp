@@ -615,10 +615,12 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float preDelaySamples = preDelayMs * 0.001f * (float) currentSampleRate;
 
     // Compresseur local de la Reinjection croisee (Option C, reglages internes, pas de
-    // parametre utilisateur separe). Seuil/ratio evoluent avec le bouton entre 0 et 70%
-    // (plus sensible/doux a 0%, jusqu'aux valeurs de reference a 70%) puis restent figes
-    // de 70% a 100% - ne change rien au comportement deja valide dans cette zone.
-    const float compRampPos = juce::jmin (crossFeedAmt / 0.7f, 1.0f);
+    // parametre utilisateur separe). Seuil/ratio evoluent avec le bouton sur toute sa
+    // course (plus sensible/doux a 0%, jusqu'aux valeurs de reference a 70%, puis la
+    // MEME rampe continue au-dela au lieu de figer - hypothese testee le 2026-07-13 a
+    // la place d'une modulation ajoutee : prolonger la tendance deja validee de 0-70%
+    // plutot que d'ajouter un mecanisme separe pour la zone haute).
+    const float compRampPos = crossFeedAmt / 0.7f;
     const float compThreshold = juce::jmap (compRampPos, 0.0f, 1.0f, 0.15f, 0.4f);
     const float compRatio     = juce::jmap (compRampPos, 0.0f, 1.0f, 2.5f, 8.0f);
     const float compAttackCoeff  = 1.0f - std::exp (-1.0f / (0.003f * (float) currentSampleRate));
