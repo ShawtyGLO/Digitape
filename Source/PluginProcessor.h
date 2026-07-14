@@ -116,6 +116,9 @@ private:
 
     juce::SmoothedValue<float> timeSmoothed, feedbackSmoothed, mixSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed, integritySmoothed;
 
+    // Preampli d'entree (saturation analogique) : seul etage volontairement analogique.
+    juce::SmoothedValue<float> saturationSmoothed;
+
     // Panneau Advanced (v0 en sliders plats, pas encore de repli visuel) : balance
     // individuelle entre mecanismes de l'Integrite, la macro pilotant toujours
     // l'intensite globale.

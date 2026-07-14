@@ -33,7 +33,7 @@ private:
 
     // Facade
     KnobWithLabel timeKnob, feedbackKnob, mixKnob, driftRateKnob, driftDepthKnob, widthKnob, driftShapeKnob,
-                  integrityKnob, wetGainKnob, syncAmountKnob, reverbSizeKnob, reverbCharacterKnob, reverbMixKnob,
+                  integrityKnob, saturationKnob, wetGainKnob, syncAmountKnob, reverbSizeKnob, reverbCharacterKnob, reverbMixKnob,
                   crossFeedbackKnob, outputGainKnob;
     juce::ToggleButton monoButton { "Mono" };
     std::unique_ptr<ButtonAttachment> monoAttachment;

@@ -4,7 +4,7 @@
     "note": "Source de vérité du layout de Digitape, en coordonnées de base (avant scale). Édité via Shawty's Plugin Factory (outil central). Sert à régénérer Source/Generated/UILayout.h.",
     "generatedFrom": "Rangement par module puis reorganisation manuelle par l'utilisateur dans Plugin Factory, 2026-07-12",
     "project": "Digitape",
-    "groups": {"text":"#cddd7a","btn":"#9fb0ab","temps":"#8e7bd6","derive":"#4bb58a","integrite":"#e0864a","reverbe":"#13add6"},
+    "groups": {"text":"#cddd7a","btn":"#9fb0ab","temps":"#8e7bd6","derive":"#4bb58a","integrite":"#e0864a","reverbe":"#13add6","preamp":"#d6a84b"},
     "typemap": {"syncNoteCombo":"button","syncFlavorCombo":"button"}
   },
   "states": {
@@ -15,6 +15,7 @@
       "controls": [
         { "id": "titleLabel", "label": "DIGITAPE", "group": "text", "x": 20, "y": 10, "w": 300, "h": 22 },
         { "id": "timeSlider", "label": "Temps", "group": "temps", "x": 30, "y": 50, "w": 90, "h": 90 },
+        { "id": "saturationSlider", "label": "Saturation", "group": "preamp", "x": 135, "y": 155, "w": 90, "h": 90 },
         { "id": "feedbackSlider", "label": "Réinjection", "group": "temps", "x": 135, "y": 50, "w": 90, "h": 90 },
         { "id": "mixSlider", "label": "Mix", "group": "temps", "x": 670, "y": 5, "w": 90, "h": 90 },
         { "id": "driftRateSlider", "label": "Dérive freq", "group": "derive", "x": 135, "y": 370, "w": 90, "h": 90 },

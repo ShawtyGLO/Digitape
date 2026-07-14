@@ -21,6 +21,7 @@ namespace UI
         {
             constexpr Rect titleLabel             {   20.0f,   10.0f,  300.0f,   22.0f };
             constexpr Rect timeSlider             {   30.0f,   50.0f,   90.0f,   90.0f };
+            constexpr Rect saturationSlider       {  135.0f,  155.0f,   90.0f,   90.0f };
             constexpr Rect feedbackSlider         {  135.0f,   50.0f,   90.0f,   90.0f };
             constexpr Rect mixSlider              {  670.0f,    5.0f,   90.0f,   90.0f };
             constexpr Rect driftRateSlider        {  135.0f,  370.0f,   90.0f,   90.0f };

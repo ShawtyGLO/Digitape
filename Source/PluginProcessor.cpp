@@ -67,6 +67,23 @@ namespace
 
         return x;
     }
+
+    // Preampli d'entree : seul etage volontairement analogique de la machine (cf. concept).
+    // Saturation douce facon tube/transfo, appliquee EN ENTREE donc elle colore tout le
+    // signal (sec, echo, reverbe) - a l'inverse de l'Integrite qui epargne le sec. Le drive
+    // monte avec le montant, une legere asymetrie ajoute des harmoniques paires (chaleur
+    // type lampe), et on melange vers le sec par le montant pour un passage sans a-coup a 0.
+    inline float preampSaturate (float x, float amount)
+    {
+        if (amount <= 0.0001f)
+            return x;
+
+        const float drive = 1.0f + amount * 5.0f;
+        const float bias  = amount * 0.12f;
+        const float norm  = std::tanh (drive);                 // garde ~l'unite a pleine echelle
+        const float sat = (std::tanh ((x + bias) * drive) - std::tanh (bias * drive)) / norm;
+        return x * (1.0f - amount) + sat * amount;
+    }
 }
 
 //==============================================================================
@@ -234,6 +251,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
+    // Preampli d'entree (saturation analogique) : colore tout le signal en entree.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "saturation", 1 }, "Saturation",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
     return { params.begin(), params.end() };
 }
 
@@ -366,6 +390,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     widthSmoothed.reset (sampleRate, smoothTime);
     driftShapeSmoothed.reset (sampleRate, smoothTime);
     integritySmoothed.reset (sampleRate, smoothTime);
+    saturationSmoothed.reset (sampleRate, smoothTime);
     bitcrushAmountSmoothed.reset (sampleRate, smoothTime);
     decimationAmountSmoothed.reset (sampleRate, smoothTime);
     wetGainSmoothed.reset (sampleRate, smoothTime);
@@ -389,6 +414,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     widthSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("width"));
     driftShapeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftShape"));
     integritySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("integrity"));
+    saturationSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("saturation"));
     bitcrushAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
     decimationAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("wetGain"));
@@ -508,6 +534,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     widthSmoothed.setTargetValue (monoEngaged ? 0.0f : *apvts.getRawParameterValue ("width"));
     driftShapeSmoothed.setTargetValue (*apvts.getRawParameterValue ("driftShape"));
     integritySmoothed.setTargetValue (*apvts.getRawParameterValue ("integrity"));
+    saturationSmoothed.setTargetValue (*apvts.getRawParameterValue ("saturation"));
     bitcrushAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
     decimationAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setTargetValue (*apvts.getRawParameterValue ("wetGain"));
@@ -571,6 +598,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float bitcrushAmt  = bitcrushAmountSmoothed.getNextValue();
         const float decimAmount  = decimationAmountSmoothed.getNextValue();
         const float wetGainLin   = wetGainSmoothed.getNextValue();  // Echo volume lineaire, 0 = coupe
+        const float saturationAmt = saturationSmoothed.getNextValue();
         const float syncAmt      = syncAmountSmoothed.getNextValue();
 
         const float effectiveTimeMs = timeMs * (1.0f - syncAmt) + syncedTimeMs * syncAmt;
@@ -622,7 +650,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         for (int ch = 0; ch < numChannels; ++ch)
         {
             auto* data = buffer.getWritePointer (ch);
-            const float inputSample = data[n];
+            // Preampli d'entree : sature le signal des l'entree, avant de le repartir vers
+            // le sec, l'echo et la reverbe - c'est l'etage analogique qui colore tout.
+            const float inputSample = preampSaturate (data[n], saturationAmt);
 
             const float delayedSample = delayLine.popSample (ch, channelDelaySamples[ch]);
             float toPush = inputSample + delayedSample * feedbackAmt;
