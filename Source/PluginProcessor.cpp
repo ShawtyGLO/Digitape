@@ -59,8 +59,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "wetGain", 1 }, "Echo volume",
-        juce::NormalisableRange<float> (-24.0f, 12.0f, 0.01f), 0.0f,
-        juce::AudioParameterFloatAttributes().withLabel ("dB")));
+        juce::NormalisableRange<float> (0.0f, 1.5f, 0.001f), 1.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "syncAmount", 1 }, "Sync accroche",
@@ -524,8 +525,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float integrityAmt = integritySmoothed.getNextValue();
         const float bitcrushAmt  = bitcrushAmountSmoothed.getNextValue();
         const float decimAmount  = decimationAmountSmoothed.getNextValue();
-        const float wetGainDb    = wetGainSmoothed.getNextValue();
-        const float wetGainLin   = juce::Decibels::decibelsToGain (wetGainDb);
+        const float wetGainLin   = wetGainSmoothed.getNextValue();  // Echo volume lineaire, 0 = coupe
         const float syncAmt      = syncAmountSmoothed.getNextValue();
 
         const float effectiveTimeMs = timeMs * (1.0f - syncAmt) + syncedTimeMs * syncAmt;
