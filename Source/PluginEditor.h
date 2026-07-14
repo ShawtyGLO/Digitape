@@ -32,7 +32,7 @@ private:
     juce::Label titleLabel;
 
     // Facade
-    KnobWithLabel timeKnob, feedbackKnob, driftRateKnob, driftDepthKnob, widthKnob, driftShapeKnob,
+    KnobWithLabel timeKnob, feedbackKnob, mixKnob, driftRateKnob, driftDepthKnob, widthKnob, driftShapeKnob,
                   integrityKnob, wetGainKnob, syncAmountKnob, reverbSizeKnob, reverbCharacterKnob, reverbMixKnob,
                   crossFeedbackKnob, outputGainKnob;
     juce::ToggleButton monoButton { "Mono" };

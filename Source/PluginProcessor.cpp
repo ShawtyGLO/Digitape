@@ -58,7 +58,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("ms")));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "wetGain", 1 }, "Niveau repetitions",
+        juce::ParameterID { "wetGain", 1 }, "Echo volume",
         juce::NormalisableRange<float> (-24.0f, 12.0f, 0.01f), 0.0f,
         juce::AudioParameterFloatAttributes().withLabel ("dB")));
 
@@ -89,7 +89,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "reverbMix", 1 }, "Reverbe niveau",
+        juce::ParameterID { "reverbMix", 1 }, "Reverb volume",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f,
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
@@ -134,6 +134,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "feedback", 1 }, "Reinjection",
         juce::NormalisableRange<float> (0.0f, 0.95f, 0.001f), 0.3f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
+    // Dry/Wet GLOBAL : dose le humide complet (echo + reverbe, chacun a son volume)
+    // contre le sec. A 0% sec pur, a 100% humide pur.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "mix", 1 }, "Mix",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f,
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
@@ -310,6 +318,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     const double smoothTime = 0.02;
     timeSmoothed.reset (sampleRate, smoothTime);
     feedbackSmoothed.reset (sampleRate, smoothTime);
+    mixSmoothed.reset (sampleRate, smoothTime);
     driftRateSmoothed.reset (sampleRate, smoothTime);
     driftDepthSmoothed.reset (sampleRate, smoothTime);
     widthSmoothed.reset (sampleRate, smoothTime);
@@ -332,6 +341,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 
     timeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("time"));
     feedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("feedback"));
+    mixSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("mix"));
     driftRateSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftRate"));
     driftDepthSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftDepth"));
     widthSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("width"));
@@ -413,25 +423,35 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     const int numChannels = juce::jmin (buffer.getNumChannels(), 2);
 
-    // Approche Roland RE-201 : pas de dry/wet global ni de dry/wet par module. Le signal
-    // sec passe toujours (a l'unite), et chaque effet s'ajoute par-dessus a son propre
-    // volume - deux boutons seulement, "Niveau repetitions" (volume delay) et "Reverbe
-    // niveau" (volume reverbe). Plus intuitif et moins de boutons redondants qu'un volume
-    // + un dry/wet par module + un dry/wet global.
+    // Etage de mix : un Dry/Wet GLOBAL (bouton Mix) par-dessus deux volumes d'effet facon
+    // Roland RE-201 - Echo volume (delay) et Reverb volume. Chaque effet a son volume dans
+    // le humide, et le Mix global dose le humide complet contre le sec.
+    //   sortie = sec*(1-Mix) + (echo*EchoVol + reverbe*ReverbVol)*Mix
     //
-    // dryDelayBuf = sec (unite) + repetitions du delay a leur volume. Ce meme signal sert
-    // a la fois de sortie directe ET d'entree du moteur de reverbe : la reverbe travaille
-    // le sec immediatement (attaque jamais repoussee par le temps de delay ni la Sync) et,
-    // quand le delay est monte, le reverbere aussi ; a volume delay au minimum, la reverbe
-    // ne travaille quasiment que le sec. Rempli dans la boucle Moteur temps.
+    // dryDelayBuf = sec (unite) + echo a son volume : c'est ce qui alimente le MOTEUR de
+    // reverbe (jamais pondere par le Mix global, pour que le caractere de la reverbe ne
+    // depende pas du dosage de sortie ; la reverbe travaille le sec immediatement, attaque
+    // jamais repoussee par le temps de delay).
     juce::AudioBuffer<float> dryDelayBuf (2, numSamples);
     dryDelayBuf.clear();
+
+    // directOutBuf = part NON-reverbe de la sortie, deja dosee par le Mix global
+    // (sec*(1-Mix) + echo*Mix). Le terme reverbe s'ajoute dans la passe finale (pas pret
+    // avant le moteur de reverbe), avec le meme dosage global.
+    juce::AudioBuffer<float> directOutBuf (2, numSamples);
+    directOutBuf.clear();
+
+    // Valeur du Mix global par echantillon (identique aux deux canaux), relue dans la
+    // passe finale ou le terme reverbe recoit le meme dosage.
+    juce::AudioBuffer<float> globalMixBuf (1, numSamples);
+    globalMixBuf.clear();
 
     // Les sliders ne changent que la valeur cible de l'APVTS : sans ces lignes,
     // les SmoothedValue restent figes sur l'etat du tout premier prepareToPlay
     // et ignorent tout ce que l'utilisateur regle ensuite dans l'interface.
     timeSmoothed.setTargetValue       (*apvts.getRawParameterValue ("time"));
     feedbackSmoothed.setTargetValue   (*apvts.getRawParameterValue ("feedback"));
+    mixSmoothed.setTargetValue        (*apvts.getRawParameterValue ("mix"));
     driftRateSmoothed.setTargetValue  (*apvts.getRawParameterValue ("driftRate"));
     driftDepthSmoothed.setTargetValue (*apvts.getRawParameterValue ("driftDepth"));
 
@@ -495,6 +515,8 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     {
         const float timeMs      = timeSmoothed.getNextValue();
         const float feedbackAmt = feedbackSmoothed.getNextValue();
+        const float globalMix   = mixSmoothed.getNextValue();   // Dry/Wet GLOBAL du plugin
+        globalMixBuf.setSample (0, n, globalMix);
         const float rateHz      = driftRateSmoothed.getNextValue();
         const float depthAmt    = driftDepthSmoothed.getNextValue();
         const float widthAmt    = widthSmoothed.getNextValue();
@@ -595,14 +617,20 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
             delayLine.pushSample (ch, toPush);
 
-            // Sec (unite) + repetitions du delay a leur volume (Niveau repetitions). Le
-            // terme reverbe s'ajoute en fin de chaine, a son propre volume. Ce signal est
-            // aussi ce qui alimente le moteur de reverbe (cf. dryDelayBuf).
+            // Echo (repetitions du delay) a son volume (Echo volume). Sec+echo alimente le
+            // moteur de reverbe (dryDelayBuf, non pondere par le Mix global). La sortie
+            // non-reverbe est deja dosee par le Mix global (sec*(1-Mix) + echo*Mix).
             const float delayWet = delayedSample * wetGainLin;
+
             float dryDelay = inputSample + delayWet;
             if (safetyOn)
                 dryDelay = softSafetyCeiling (dryDelay, 1.2f);
             dryDelayBuf.setSample (ch, n, dryDelay);
+
+            float directOut = inputSample * (1.0f - globalMix) + delayWet * globalMix;
+            if (safetyOn)
+                directOut = softSafetyCeiling (directOut, 1.2f);
+            directOutBuf.setSample (ch, n, directOut);
         }
     }
 
@@ -782,7 +810,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     for (int ch = 0; ch < numChannels; ++ch)
     {
         auto* data = buffer.getWritePointer (ch);
-        const auto* directData = dryDelayBuf.getReadPointer (ch);
+        const auto* directData = directOutBuf.getReadPointer (ch);
         for (int n = 0; n < numSamples; ++n)
         {
             float wet = data[n];
@@ -815,9 +843,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
             crossFeedDelayLine.pushSample (ch, reverbContribution * compGain);
 
-            // Sortie RE-201 : sec+delay (directData, sec toujours a l'unite) + reverbe a
-            // son volume. Les deux effets s'ajoutent par-dessus le sec, pas de dry/wet.
-            float mixed = directData[n] + reverbContribution;
+            // Sortie = part non-reverbe deja dosee par le Mix global (directData) + terme
+            // reverbe (a son volume) dose par le meme Mix global. A Mix=0 : sortie seche
+            // pure ; a Mix=1 : sec efface, echo+reverbe a leurs volumes respectifs.
+            const float gm = globalMixBuf.getSample (0, n);
+            float mixed = directData[n] + reverbContribution * gm;
             if (safetyOn)
                 mixed = softSafetyCeiling (mixed, 1.2f);
 

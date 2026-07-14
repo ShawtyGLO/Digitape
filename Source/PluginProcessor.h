@@ -103,7 +103,7 @@ private:
     // l'emballement numerique, pas contre le niveau d'ecoute choisi).
     juce::SmoothedValue<float> outputGainSmoothed;
 
-    juce::SmoothedValue<float> timeSmoothed, feedbackSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed, integritySmoothed;
+    juce::SmoothedValue<float> timeSmoothed, feedbackSmoothed, mixSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed, integritySmoothed;
 
     // Panneau Advanced (v0 en sliders plats, pas encore de repli visuel) : balance
     // individuelle entre mecanismes de l'Integrite, la macro pilotant toujours

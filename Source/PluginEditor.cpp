@@ -14,16 +14,17 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
 
     setupKnob (timeKnob,       "time",       "Temps");
     setupKnob (feedbackKnob,   "feedback",   "Reinjection");
+    setupKnob (mixKnob,        "mix",        "Mix");
     setupKnob (driftRateKnob,  "driftRate",  "Derive freq");
     setupKnob (driftDepthKnob, "driftDepth", "Derive prof.");
     setupKnob (widthKnob,      "width",      "Largeur");
     setupKnob (driftShapeKnob, "driftShape", "Derive forme");
     setupKnob (integrityKnob,  "integrity",  "Integrite");
-    setupKnob (wetGainKnob,    "wetGain",    "Niv. repet.");
+    setupKnob (wetGainKnob,    "wetGain",    "Echo volume");
     setupKnob (syncAmountKnob, "syncAmount", "Sync accroche");
     setupKnob (reverbSizeKnob,      "reverbSize",      "Reverbe taille");
     setupKnob (reverbCharacterKnob, "reverbCharacter", "Reverbe caract.");
-    setupKnob (reverbMixKnob,       "reverbMix",       "Reverbe niveau");
+    setupKnob (reverbMixKnob,       "reverbMix",       "Reverb volume");
     setupKnob (crossFeedbackKnob,   "crossFeedback",   "Reinjection croisee");
     setupKnob (outputGainKnob,      "outputGain",      "Volume sortie");
 
@@ -90,6 +91,7 @@ void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
 
     timeKnob.slider.setVisible (!shouldShow);       timeKnob.label.setVisible (!shouldShow);
     feedbackKnob.slider.setVisible (!shouldShow);   feedbackKnob.label.setVisible (!shouldShow);
+    mixKnob.slider.setVisible (!shouldShow);        mixKnob.label.setVisible (!shouldShow);
     driftRateKnob.slider.setVisible (!shouldShow);  driftRateKnob.label.setVisible (!shouldShow);
     driftDepthKnob.slider.setVisible (!shouldShow); driftDepthKnob.label.setVisible (!shouldShow);
     widthKnob.slider.setVisible (!shouldShow);      widthKnob.label.setVisible (!shouldShow);
@@ -134,6 +136,7 @@ void DigitapeAudioProcessorEditor::resized()
 
     placeKnob (timeKnob,       UI::ctrl::facade::timeSlider.x,       UI::ctrl::facade::timeSlider.y,       UI::ctrl::facade::timeSlider.w,       UI::ctrl::facade::timeSlider.h);
     placeKnob (feedbackKnob,   UI::ctrl::facade::feedbackSlider.x,   UI::ctrl::facade::feedbackSlider.y,   UI::ctrl::facade::feedbackSlider.w,   UI::ctrl::facade::feedbackSlider.h);
+    placeKnob (mixKnob,        UI::ctrl::facade::mixSlider.x,        UI::ctrl::facade::mixSlider.y,        UI::ctrl::facade::mixSlider.w,        UI::ctrl::facade::mixSlider.h);
     placeKnob (driftRateKnob,  UI::ctrl::facade::driftRateSlider.x,  UI::ctrl::facade::driftRateSlider.y,  UI::ctrl::facade::driftRateSlider.w,  UI::ctrl::facade::driftRateSlider.h);
     placeKnob (driftDepthKnob, UI::ctrl::facade::driftDepthSlider.x, UI::ctrl::facade::driftDepthSlider.y, UI::ctrl::facade::driftDepthSlider.w, UI::ctrl::facade::driftDepthSlider.h);
     placeKnob (widthKnob,      UI::ctrl::facade::widthSlider.x,      UI::ctrl::facade::widthSlider.y,      UI::ctrl::facade::widthSlider.w,      UI::ctrl::facade::widthSlider.h);
