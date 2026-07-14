@@ -95,20 +95,28 @@ namespace
         st.preLp += (in - st.preLp) * shelfCoeff;
         float xe = (in - st.preLp) + st.preLp * preGain;       // aigus intacts, graves boostes
 
-        // --- Courbe du modele ---
+        // --- Courbe du modele, NORMALISEE a gain unite en petit signal (division par la
+        // pente a l'origine, qui vaut ~drive). Sans ca, a bas drive la sortie s'effondre et
+        // l'auto-gain borne ne rattrape pas -> "coupure" quand on monte la saturation depuis
+        // 0. Ici la courbe tend vers l'identite a bas drive (pas de trou), et l'auto-gain ne
+        // fait plus qu'une correction fine du RMS a mesure que la saturation s'installe.
         float s;
         if (type == 0)        // Lampe : asymetrie -> harmoniques paires
         {
             const float bias = 0.25f;
-            s = std::tanh (xe * drive + bias) - std::tanh (bias);   // - offset moyen du biais
+            const float sech2 = 1.0f / (std::cosh (bias) * std::cosh (bias));   // pente due au biais
+            const float g0 = drive * sech2;
+            s = (std::tanh (xe * drive + bias) - std::tanh (bias)) / g0;
         }
         else if (type == 1)   // Transfo : symetrique, genou plus ferme (arctan)
         {
-            s = (2.0f / juce::MathConstants<float>::pi) * std::atan (xe * drive * 1.5f);
+            const float k = drive * 1.5f;
+            s = std::atan (xe * k) / k;    // atan(kx)/k -> x quand k->0 : pente unite
         }
         else                  // Bande : douce + perte HF qui augmente avec le drive
         {
-            s = std::tanh (xe * drive * 0.8f);
+            const float k = drive * 0.8f;
+            s = std::tanh (xe * k) / k;    // tanh(kx)/k -> x quand k->0 : pente unite
             const float hfCutoff = 18000.0f - amount * 12000.0f;    // 18k -> 6k
             const float hfCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * hfCutoff / (float) sr);
             st.bandeLp += (s - st.bandeLp) * hfCoeff;
