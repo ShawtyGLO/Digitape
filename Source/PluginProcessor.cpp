@@ -426,6 +426,16 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     juce::AudioBuffer<float> wetGainCorrection (2, numSamples);
     wetGainCorrection.clear();
 
+    // Ce qui alimente le MOTEUR de reverbe, distinct du son direct (le melange
+    // delay/dry que l'utilisateur entend). La reverbe recoit toujours le signal sec
+    // en entier et immediatement (son attaque n'est jamais repoussee par le temps de
+    // delay ni la Sync), plus les repetitions du delay par-dessus quand le Mix est
+    // ouvert - donc quand le delay est actif il continue de se reverberer (caractere
+    // ambiant RE-201), mais couper le delay rend la reverbe totalement independante
+    // du Moteur temps. Rempli dans la boucle Moteur temps ci-dessous.
+    juce::AudioBuffer<float> reverbInput (2, numSamples);
+    reverbInput.clear();
+
     // Les sliders ne changent que la valeur cible de l'APVTS : sans ces lignes,
     // les SmoothedValue restent figes sur l'etat du tout premier prepareToPlay
     // et ignorent tout ce que l'utilisateur regle ensuite dans l'interface.
@@ -604,6 +614,15 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float neutralOut = inputSample * (1.0f - mixAmt) + delayedSample * mixAmt;
             wetGainCorrection.setSample (ch, n, delayedSample * mixAmt * (wetGainLin - 1.0f));
 
+            // Entree de la reverbe : signal sec complet (toujours, quel que soit le Mix
+            // delay) + les repetitions du delay. A Mix=0 c'est le sec pur (reverbe
+            // strictement independante du temps de delay) ; a Mix ouvert le delay se
+            // reverbere en plus, sans jamais retarder l'attaque du sec.
+            float reverbInSample = inputSample + delayedSample * mixAmt;
+            if (safetyOn)
+                reverbInSample = softSafetyCeiling (reverbInSample, 1.2f);
+            reverbInput.setSample (ch, n, reverbInSample);
+
             float outSample = neutralOut;
             if (safetyOn)
                 outSample = softSafetyCeiling (outSample, 1.2f);
@@ -695,7 +714,10 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         for (int ch = 0; ch < numChannels; ++ch)
         {
             auto* data = buffer.getWritePointer (ch);
-            float x = data[n];
+            // Le moteur de reverbe lit reverbInput (sec + repetitions), pas le son direct
+            // deja capture dans reverbDry - c'est ce qui decouple l'attaque de la reverbe
+            // du temps de delay.
+            float x = reverbInput.getSample (ch, n);
 
             const float absX = std::abs (x);
             transientFastEnv[ch] += (absX - transientFastEnv[ch]) * transientFastCoeff;
