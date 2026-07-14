@@ -446,7 +446,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     driftPhase = 0.0f;
     steppedGlideL = 0.0f;
     steppedGlideR = 0.0f;
-    widthDriftPhase = 0.0f;
+    widthChorusPhase = 0.0f;
 
     for (int ch = 0; ch < 2; ++ch)
     {
@@ -610,19 +610,23 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         if (driftPhase >= 1.0f)
             driftPhase -= 1.0f;
 
-        // Largeur 0-100% : dephasage statique du canal droit, jusqu'a l'opposition totale
-        // a 100% (0.5 cycle). Au-dela, le dephasage seul repartirait vers l'alignement -
-        // on ajoute donc une legere divergence de VITESSE (le canal droit derive un peu
-        // plus vite), facon chorus : la relation de phase L/R evolue en continu au lieu
-        // d'etre figee. widthDriftPhase est cet ecart de phase qui tourne lentement.
-        const float phaseOffset = juce::jmin (widthAmt, 1.0f) * 0.5f;
-        const float extraWidth  = juce::jmax (0.0f, widthAmt - 1.0f);   // 0..1 sur 100-200%
-        widthDriftPhase += rateHz * extraWidth * 0.2f / (float) currentSampleRate;
-        if (widthDriftPhase >= 1.0f)
-            widthDriftPhase -= 1.0f;
+        // Largeur — une seule course continue de 0 a 200%, sans rupture a 100%. La version
+        // precedente n'activait le mouvement (chorus) qu'au-dela de 100%, d'ou la sensation
+        // de "deux courses". Ici deux decorrelations L/R montent ENSEMBLE, lineairement :
+        //  (1) un dephasage statique du canal droit (0 -> opposition totale a 200%) ;
+        //  (2) un leger chorus : un LFO lent (widthChorusPhase) module en opposition le temps
+        //      de lecture des deux canaux, sa PROFONDEUR suivant le bouton.
+        // Les deux valent 0 a Largeur nulle (mono parfait). Le LFO tourne toujours mais c'est
+        // sa profondeur, pas une phase accumulee, qui suit le bouton -> retour a 0 sans residu.
+        const float phaseOffset = widthAmt * 0.25f;             // 0..0.5 (opposition a 200%)
+        const float chorusDepth = widthAmt * 0.15f;             // 0 a Largeur nulle
+        widthChorusPhase += 0.5f / (float) currentSampleRate;   // LFO de chorus lent (~0.5 Hz)
+        if (widthChorusPhase >= 1.0f)
+            widthChorusPhase -= 1.0f;
+        const float widthChorus = std::sin (widthChorusPhase * juce::MathConstants<float>::twoPi) * chorusDepth;
 
-        float driftPhaseR = driftPhase + phaseOffset + widthDriftPhase;
-        while (driftPhaseR >= 1.0f)
+        float driftPhaseR = driftPhase + phaseOffset;
+        if (driftPhaseR >= 1.0f)
             driftPhaseR -= 1.0f;
 
         const float lfoSmoothL = std::sin (driftPhase  * juce::MathConstants<float>::twoPi);
@@ -642,8 +646,10 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         steppedGlideL += (targetSteppedL - steppedGlideL) * glideCoeff;
         steppedGlideR += (targetSteppedR - steppedGlideR) * glideCoeff;
 
-        const float lfoL = lfoSmoothL * (1.0f - shapeAmt) + steppedGlideL * shapeAmt;
-        const float lfoR = lfoSmoothR * (1.0f - shapeAmt) + steppedGlideR * shapeAmt;
+        // Le chorus de Largeur module les deux canaux en OPPOSITION (-L / +R) : image plus
+        // large, centre stable. Nul a Largeur nulle -> pas de mouvement ajoute en mono.
+        const float lfoL = lfoSmoothL * (1.0f - shapeAmt) + steppedGlideL * shapeAmt - widthChorus;
+        const float lfoR = lfoSmoothR * (1.0f - shapeAmt) + steppedGlideR * shapeAmt + widthChorus;
 
         const float modDepthMs = depthAmt * effectiveTimeMs * 0.2f;
         const float delaySamplesL = juce::jmax (0.1f, effectiveTimeMs + lfoL * modDepthMs) * 0.001f * (float) currentSampleRate;
