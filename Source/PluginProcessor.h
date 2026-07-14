@@ -56,8 +56,15 @@ private:
 
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLine { 192000 };
 
-    // Reverbe v0 : moteur JUCE integre, remplace plus tard par le reseau FDN maison.
-    juce::dsp::Reverb reverb;
+    // Reseau a retards rebouclés (FDN) maison, remplace juce::dsp::Reverb : 4 allpass de
+    // pre-diffusion en serie -> reservoir de 4 lignes reboucleées via une matrice de
+    // Householder (energie preservee, stable par construction tant que chaque gain de
+    // ligne reste <1 - ce qui est toujours le cas ici, la formule de decroissance ne
+    // produit jamais de gain >=1).
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> fdnAllpassDelay[4];
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> fdnTankDelay[4];
+    float fdnTankDampState[4][2] {};
+
     juce::SmoothedValue<float> reverbSizeSmoothed, reverbCharacterSmoothed, reverbMixSmoothed;
 
     // Etages autour du moteur de reverbe (Transient, Input filter, Pre-delai, Brightness) -

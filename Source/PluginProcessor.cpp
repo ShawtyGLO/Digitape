@@ -271,8 +271,21 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     delayLine.prepare (spec);
     delayLine.reset();
 
-    reverb.prepare (spec);
-    reverb.reset();
+    for (auto& d : fdnAllpassDelay)
+    {
+        d.setMaximumDelayInSamples ((int) (0.05 * sampleRate));
+        d.prepare (spec);
+        d.reset();
+    }
+    for (auto& d : fdnTankDelay)
+    {
+        d.setMaximumDelayInSamples ((int) (0.3 * sampleRate));
+        d.prepare (spec);
+        d.reset();
+    }
+    for (auto& row : fdnTankDampState)
+        for (auto& v : row)
+            v = 0.0f;
 
     preDelayLine.setMaximumDelayInSamples ((int) (0.2 * sampleRate));
     preDelayLine.prepare (spec);
@@ -593,14 +606,25 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float lowpassHz       = reverbLowpassSmoothed.getNextValue();
     const float brightnessVal   = reverbBrightnessSmoothed.getNextValue();
 
-    juce::dsp::Reverb::Parameters reverbParams;
-    reverbParams.roomSize   = reverbSizeVal;
-    reverbParams.damping    = reverbCharVal;
-    reverbParams.wetLevel   = 1.0f;
-    reverbParams.dryLevel   = 0.0f;
-    reverbParams.width      = 1.0f;
-    reverbParams.freezeMode = 0.0f;
-    reverb.setParameters (reverbParams);
+    // FDN : Caractere pilote l'amortissement (cristallin=aigus preserves, casse=sombre) ;
+    // Taille/Decroissance pilote un temps de decroissance (RT60-like) commun aux 4 lignes,
+    // chacune avec le gain de reinjection qui lui correspond compte tenu de sa longueur.
+    const float fdnDampCutoffHz = juce::jmap (reverbCharVal, 0.0f, 1.0f, 16000.0f, 1500.0f);
+    const float fdnDampCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * fdnDampCutoffHz / (float) currentSampleRate);
+    const float fdnDecaySeconds = juce::jmap (reverbSizeVal, 0.0f, 1.0f, 0.3f, 8.0f);
+
+    static constexpr float fdnAllpassTimesMs[4] = { 4.3f, 7.9f, 11.7f, 3.1f };
+    static constexpr float fdnTankTimesMs[4]    = { 29.7f, 37.1f, 41.3f, 47.9f };
+    constexpr float fdnAllpassCoeff = 0.6f;
+
+    float fdnAllpassSamples[4], fdnTankSamples[4], fdnFeedbackGain[4];
+    for (int i = 0; i < 4; ++i)
+    {
+        fdnAllpassSamples[i] = fdnAllpassTimesMs[i] * 0.001f * (float) currentSampleRate;
+        fdnTankSamples[i]    = fdnTankTimesMs[i]    * 0.001f * (float) currentSampleRate;
+        const float lineTimeSeconds = fdnTankTimesMs[i] * 0.001f;
+        fdnFeedbackGain[i] = std::pow (10.0f, -3.0f * lineTimeSeconds / fdnDecaySeconds);
+    }
 
     juce::AudioBuffer<float> reverbDry;
     reverbDry.makeCopyOf (buffer, true);
@@ -653,9 +677,41 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         }
     }
 
-    juce::dsp::AudioBlock<float> reverbBlock (buffer);
-    juce::dsp::ProcessContextReplacing<float> reverbContext (reverbBlock);
-    reverb.process (reverbContext);
+    for (int n = 0; n < numSamples; ++n)
+    {
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            auto* data = buffer.getWritePointer (ch);
+            float diffused = data[n];
+
+            // Pre-diffusion : 4 allpass Schroeder en serie, brouille les premieres
+            // reflexions sans colorer le spectre (structure allpass = gain unite a
+            // toute frequence par construction).
+            for (int i = 0; i < 4; ++i)
+            {
+                const float wD = fdnAllpassDelay[i].popSample (ch, fdnAllpassSamples[i]);
+                const float w  = diffused + fdnAllpassCoeff * wD;
+                fdnAllpassDelay[i].pushSample (ch, w);
+                diffused = -fdnAllpassCoeff * w + wD;
+            }
+
+            // Reservoir : 4 lignes rebouclees via une matrice de Householder (H = I -
+            // (2/N)*ones(N,N)) - preserve l'energie, stable par construction tant que
+            // chaque gain de ligne reste <1 (garanti par la formule de decroissance).
+            float tankRaw[4], tankFed[4];
+            for (int i = 0; i < 4; ++i)
+            {
+                tankRaw[i] = fdnTankDelay[i].popSample (ch, fdnTankSamples[i]);
+                fdnTankDampState[i][ch] += (tankRaw[i] - fdnTankDampState[i][ch]) * fdnDampCoeff;
+                tankFed[i] = fdnTankDampState[i][ch] * fdnFeedbackGain[i];
+            }
+            const float tankSum = tankFed[0] + tankFed[1] + tankFed[2] + tankFed[3];
+            for (int i = 0; i < 4; ++i)
+                fdnTankDelay[i].pushSample (ch, tankFed[i] - 0.5f * tankSum + diffused);
+
+            data[n] = 0.25f * (tankRaw[0] + tankRaw[1] + tankRaw[2] + tankRaw[3]);
+        }
+    }
 
     // Brightness : tilt sur le humide seul (jamais le direct) - separation lisse/aigu
     // via un simple passe-bas, puis rebalance des deux bandes.
