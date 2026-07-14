@@ -80,6 +80,12 @@ private:
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> crossFeedDelayLine { 4800 };
     juce::SmoothedValue<float> crossFeedbackSmoothed;
 
+    // Compression locale a l'injection de la boucle croisee (interne, pas de parametre
+    // utilisateur) : controle le signal des son entree dans la memoire de la boucle
+    // plutot que de reagir seulement quand ca deborde - evite l'emballement a la source
+    // ET fait ressortir le grain progressivement plutot qu'un "rien ne se passe avant 100%".
+    float crossFeedCompEnv[2] { 0.0f, 0.0f };
+
     // Volume de sortie : tout en fin de chaine, pour experimenter avec la saturation
     // sans se cramer les oreilles - independant de la Securite (qui protege contre
     // l'emballement numerique, pas contre le niveau d'ecoute choisi).

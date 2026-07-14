@@ -336,6 +336,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         reverbHpState[ch] = 0.0f;
         reverbLpState[ch] = 0.0f;
         tiltLpState[ch] = 0.0f;
+        crossFeedCompEnv[ch] = 0.0f;
     }
 
     driftPhase = 0.0f;
@@ -613,6 +614,12 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float lpCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * lowpassHz  / (float) currentSampleRate);
     const float preDelaySamples = preDelayMs * 0.001f * (float) currentSampleRate;
 
+    // Compresseur local de la Reinjection croisee (Option C, reglages internes fixes).
+    constexpr float compThreshold = 0.4f;
+    constexpr float compRatio = 8.0f;
+    const float compAttackCoeff  = 1.0f - std::exp (-1.0f / (0.003f * (float) currentSampleRate));
+    const float compReleaseCoeff = 1.0f - std::exp (-1.0f / (0.1f   * (float) currentSampleRate));
+
     for (int n = 0; n < numSamples; ++n)
     {
         for (int ch = 0; ch < numChannels; ++ch)
@@ -667,7 +674,23 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // agisse aussi comme un levier naturel sur la boucle croisee - le baisser
             // calme la reinjection aussi, pas seulement ce qu'on entend en direct.
             const float wetForMix = wet * reverbMixVal;
-            crossFeedDelayLine.pushSample (ch, wetForMix);
+
+            // Compression locale (Option C) : controle ce qui entre dans la memoire de
+            // la boucle des le depart, plutot qu'un plafond qui n'agit qu'a l'extreme.
+            // Seuil/ratio/temps fixes en interne, pas exposes a l'utilisateur.
+            const float compInputLevel = std::abs (wetForMix);
+            const float compCoeff = (compInputLevel > crossFeedCompEnv[ch]) ? compAttackCoeff : compReleaseCoeff;
+            crossFeedCompEnv[ch] += (compInputLevel - crossFeedCompEnv[ch]) * compCoeff;
+
+            float compGain = 1.0f;
+            if (crossFeedCompEnv[ch] > compThreshold)
+            {
+                const float excessDb = juce::Decibels::gainToDecibels (crossFeedCompEnv[ch] / compThreshold);
+                const float reductionDb = excessDb * (1.0f - 1.0f / compRatio);
+                compGain = juce::Decibels::decibelsToGain (-reductionDb);
+            }
+
+            crossFeedDelayLine.pushSample (ch, wetForMix * compGain);
 
             float mixed = dryData[n] * (1.0f - reverbMixVal) + wetForMix
                         + wetGainCorrection.getSample (ch, n);
