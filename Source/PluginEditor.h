@@ -43,8 +43,9 @@ private:
     // Advanced (deplie via advancedToggle)
     KnobWithLabel bitcrushAmountKnob, decimationAmountKnob;
     KnobWithLabel reverbPreDelayKnob, reverbTransientKnob, reverbHighpassKnob, reverbLowpassKnob, reverbBrightnessKnob;
-    juce::ComboBox syncNoteCombo, syncFlavorCombo;
-    std::unique_ptr<ComboBoxAttachment> syncNoteAttachment, syncFlavorAttachment;
+    KnobWithLabel saturationEmphasisKnob;
+    juce::ComboBox syncNoteCombo, syncFlavorCombo, saturationTypeCombo;
+    std::unique_ptr<ComboBoxAttachment> syncNoteAttachment, syncFlavorAttachment, saturationTypeAttachment;
 
     juce::TextButton advancedToggle { "Advanced" };
     bool showingAdvanced { false };

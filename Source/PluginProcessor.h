@@ -2,6 +2,19 @@
 
 #include <JuceHeader.h>
 
+// Etat par canal du preampli d'entree (saturation analogique) : filtres de pre/de-emphasis
+// des graves, perte HF du modele Bande, bloqueur de DC, et enveloppes RMS de l'auto-gain.
+struct PreampState
+{
+    float preLp   = 0.0f;   // one-pole du pre-emphasis grave
+    float deLp    = 0.0f;   // one-pole du de-emphasis grave (inverse)
+    float bandeLp = 0.0f;   // perte HF facon bande (modele Bande)
+    float dcX1    = 0.0f;   // bloqueur de DC : x[n-1]
+    float dcY1    = 0.0f;   // bloqueur de DC : y[n-1]
+    float inEnv   = 0.0f;   // enveloppe RMS de l'entree  (auto-gain)
+    float outEnv  = 0.0f;   // enveloppe RMS de la sortie (auto-gain)
+};
+
 // Digitape — Moteur temps (v0) : ligne a retard a vitesse modulee, avec reinjection et derive.
 class DigitapeAudioProcessor : public juce::AudioProcessor
 {
@@ -117,7 +130,9 @@ private:
     juce::SmoothedValue<float> timeSmoothed, feedbackSmoothed, mixSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed, integritySmoothed;
 
     // Preampli d'entree (saturation analogique) : seul etage volontairement analogique.
-    juce::SmoothedValue<float> saturationSmoothed;
+    // Drive + emphasis grave (facon Bus Force) ; le type de modele est lu au rythme du bloc.
+    juce::SmoothedValue<float> saturationSmoothed, saturationEmphasisSmoothed;
+    PreampState preampState[2];
 
     // Panneau Advanced (v0 en sliders plats, pas encore de repli visuel) : balance
     // individuelle entre mecanismes de l'Integrite, la macro pilotant toujours

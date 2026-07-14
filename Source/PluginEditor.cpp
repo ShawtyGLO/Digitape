@@ -42,6 +42,11 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     setupKnob (reverbHighpassKnob,   "reverbHighpass",   "Reverbe HP");
     setupKnob (reverbLowpassKnob,    "reverbLowpass",    "Reverbe LP");
     setupKnob (reverbBrightnessKnob, "reverbBrightness", "Reverbe bright.");
+    setupKnob (saturationEmphasisKnob, "saturationEmphasis", "Sat emphasis");
+
+    saturationTypeCombo.addItemList ({ "Lampe", "Transfo", "Bande" }, 1);
+    addAndMakeVisible (saturationTypeCombo);
+    saturationTypeAttachment = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, "saturationType", saturationTypeCombo);
 
     syncNoteCombo.addItemList ({ "1/32", "1/16", "1/8", "1/4", "1/2", "1/1" }, 1);
     addAndMakeVisible (syncNoteCombo);
@@ -119,6 +124,8 @@ void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
     reverbHighpassKnob.slider.setVisible (shouldShow);   reverbHighpassKnob.label.setVisible (shouldShow);
     reverbLowpassKnob.slider.setVisible (shouldShow);    reverbLowpassKnob.label.setVisible (shouldShow);
     reverbBrightnessKnob.slider.setVisible (shouldShow); reverbBrightnessKnob.label.setVisible (shouldShow);
+    saturationEmphasisKnob.slider.setVisible (shouldShow); saturationEmphasisKnob.label.setVisible (shouldShow);
+    saturationTypeCombo.setVisible (shouldShow);
 
     setSize (760, shouldShow ? 280 : 460);
 }
@@ -163,6 +170,8 @@ void DigitapeAudioProcessorEditor::resized()
     placeKnob (reverbHighpassKnob,   UI::ctrl::advanced::reverbHighpassSlider.x,   UI::ctrl::advanced::reverbHighpassSlider.y,   UI::ctrl::advanced::reverbHighpassSlider.w,   UI::ctrl::advanced::reverbHighpassSlider.h);
     placeKnob (reverbLowpassKnob,    UI::ctrl::advanced::reverbLowpassSlider.x,    UI::ctrl::advanced::reverbLowpassSlider.y,    UI::ctrl::advanced::reverbLowpassSlider.w,    UI::ctrl::advanced::reverbLowpassSlider.h);
     placeKnob (reverbBrightnessKnob, UI::ctrl::advanced::reverbBrightnessSlider.x, UI::ctrl::advanced::reverbBrightnessSlider.y, UI::ctrl::advanced::reverbBrightnessSlider.w, UI::ctrl::advanced::reverbBrightnessSlider.h);
+    placeKnob (saturationEmphasisKnob, UI::ctrl::advanced::saturationEmphasisSlider.x, UI::ctrl::advanced::saturationEmphasisSlider.y, UI::ctrl::advanced::saturationEmphasisSlider.w, UI::ctrl::advanced::saturationEmphasisSlider.h);
+    saturationTypeCombo.setBounds ((int) UI::ctrl::advanced::saturationTypeCombo.x, (int) UI::ctrl::advanced::saturationTypeCombo.y, (int) UI::ctrl::advanced::saturationTypeCombo.w, (int) UI::ctrl::advanced::saturationTypeCombo.h);
 
     syncNoteCombo.setBounds   ((int) UI::ctrl::facade::syncNoteCombo.x,   (int) UI::ctrl::facade::syncNoteCombo.y,   (int) UI::ctrl::facade::syncNoteCombo.w,   (int) UI::ctrl::facade::syncNoteCombo.h);
     syncFlavorCombo.setBounds ((int) UI::ctrl::facade::syncFlavorCombo.x, (int) UI::ctrl::facade::syncFlavorCombo.y, (int) UI::ctrl::facade::syncFlavorCombo.w, (int) UI::ctrl::facade::syncFlavorCombo.h);

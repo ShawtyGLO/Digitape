@@ -5,7 +5,7 @@
     "generatedFrom": "Rangement par module puis reorganisation manuelle par l'utilisateur dans Plugin Factory, 2026-07-12",
     "project": "Digitape",
     "groups": {"text":"#cddd7a","btn":"#9fb0ab","temps":"#8e7bd6","derive":"#4bb58a","integrite":"#e0864a","reverbe":"#13add6","preamp":"#d6a84b"},
-    "typemap": {"syncNoteCombo":"button","syncFlavorCombo":"button"}
+    "typemap": {"syncNoteCombo":"button","syncFlavorCombo":"button","saturationTypeCombo":"button"}
   },
   "states": {
     "facade": {
@@ -47,7 +47,9 @@
         { "id": "reverbTransientSlider", "label": "Reverbe transient", "group": "reverbe", "x": 170, "y": 150, "w": 90, "h": 90 },
         { "id": "reverbHighpassSlider", "label": "Reverbe HP", "group": "reverbe", "x": 300, "y": 150, "w": 90, "h": 90 },
         { "id": "reverbLowpassSlider", "label": "Reverbe LP", "group": "reverbe", "x": 430, "y": 150, "w": 90, "h": 90 },
-        { "id": "reverbBrightnessSlider", "label": "Reverbe brightness", "group": "reverbe", "x": 560, "y": 150, "w": 90, "h": 90 }
+        { "id": "reverbBrightnessSlider", "label": "Reverbe brightness", "group": "reverbe", "x": 560, "y": 150, "w": 90, "h": 90 },
+        { "id": "saturationEmphasisSlider", "label": "Sat emphasis", "group": "preamp", "x": 300, "y": 50, "w": 90, "h": 90 },
+        { "id": "saturationTypeCombo", "label": "Sat type", "group": "preamp", "x": 430, "y": 60, "w": 140, "h": 28 }
       ]
     }
   },

@@ -50,6 +50,8 @@ namespace UI
             constexpr Rect reverbHighpassSlider   {  300.0f,  150.0f,   90.0f,   90.0f };
             constexpr Rect reverbLowpassSlider    {  430.0f,  150.0f,   90.0f,   90.0f };
             constexpr Rect reverbBrightnessSlider {  560.0f,  150.0f,   90.0f,   90.0f };
+            constexpr Rect saturationEmphasisSlider {  300.0f,   50.0f,   90.0f,   90.0f };
+            constexpr Rect saturationTypeCombo    {  430.0f,   60.0f,  140.0f,   28.0f };
         }
     }
 

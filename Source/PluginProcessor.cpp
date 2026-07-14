@@ -69,23 +69,69 @@ namespace
     }
 
     // Preampli d'entree : seul etage volontairement analogique de la machine (cf. concept).
-    // Saturation douce appliquee EN ENTREE, donc elle colore tout le signal (sec, echo,
-    // reverbe) - a l'inverse de l'Integrite qui epargne le sec.
+    // Applique EN ENTREE, donc colore tout le signal (sec, echo, reverbe) - a l'inverse de
+    // l'Integrite qui epargne le sec. Chaine, dans l'ordre :
+    //   pre-emphasis grave -> courbe du modele -> de-emphasis grave -> DC blocker -> auto-gain.
     //
-    // UNE SEULE course : le drive monte avec le montant (saturation qui s'installe des le
-    // bas de la course, pas seulement vers 50%), et un makeup AUTOMATIQUE cale un niveau de
-    // reference (~ -10 dBFS) constant en sortie - le volume percu ne monte plus quand on
-    // sature. Pas de melange dry/wet superpose (c'est ce qui donnait la sensation de deux
-    // courses). A montant nul : identite (drive -> 0, makeup -> 1/drive, tanh(x*d)/d -> x).
-    inline float preampSaturate (float x, float amount)
+    //  * Emphasis grave (facon Arturia Bus Force) : on booste les graves AVANT la saturation
+    //    (ils generent alors plus d'harmoniques), et on annule ce boost APRES (de-emphasis) -
+    //    les harmoniques restent (elles sont au-dessus du fondamental) mais l'equilibre du bas
+    //    est retabli. Bas riche et chaud sans devenir boueux.
+    //  * Modeles : Lampe (asymetrique -> harmoniques paires, chaleur), Transfo (symetrique
+    //    plus ferme -> impaires, punch), Bande (doux + perte HF croissante -> chaleur sombre).
+    //  * Auto-gain RMS : cale le RMS de sortie sur celui de l'entree (suiveurs d'enveloppe)
+    //    plutot qu'une reference fixe - niveau percu constant quel que soit le materiel/drive.
+    inline float preampProcess (float x, float amount, int type, float emphasis, PreampState& st, double sr)
     {
         if (amount <= 0.0001f)
             return x;
 
-        const float drive  = amount * 8.0f;
-        const float ref    = 0.3f;                             // niveau conserve par le makeup
-        const float makeup = ref / std::tanh (ref * drive);
-        return std::tanh (x * drive) * makeup;
+        const float in = x;
+        const float drive = amount * 8.0f;
+
+        // --- Pre-emphasis grave : shelf grave positif (one-pole ~200 Hz) ---
+        const float shelfCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * 200.0f / (float) sr);
+        const float preGain = 1.0f + emphasis * 3.0f;          // jusqu'a ~+12 dB sur les graves
+        st.preLp += (in - st.preLp) * shelfCoeff;
+        float xe = (in - st.preLp) + st.preLp * preGain;       // aigus intacts, graves boostes
+
+        // --- Courbe du modele ---
+        float s;
+        if (type == 0)        // Lampe : asymetrie -> harmoniques paires
+        {
+            const float bias = 0.25f;
+            s = std::tanh (xe * drive + bias) - std::tanh (bias);   // - offset moyen du biais
+        }
+        else if (type == 1)   // Transfo : symetrique, genou plus ferme (arctan)
+        {
+            s = (2.0f / juce::MathConstants<float>::pi) * std::atan (xe * drive * 1.5f);
+        }
+        else                  // Bande : douce + perte HF qui augmente avec le drive
+        {
+            s = std::tanh (xe * drive * 0.8f);
+            const float hfCutoff = 18000.0f - amount * 12000.0f;    // 18k -> 6k
+            const float hfCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * hfCutoff / (float) sr);
+            st.bandeLp += (s - st.bandeLp) * hfCoeff;
+            s = st.bandeLp;
+        }
+
+        // --- De-emphasis grave : shelf grave inverse (retablit l'equilibre du bas) ---
+        st.deLp += (s - st.deLp) * shelfCoeff;
+        float sd = (s - st.deLp) + st.deLp * (1.0f / preGain);
+
+        // --- DC blocker : l'asymetrie (Lampe) introduit un offset a retirer ---
+        const float R = 0.9995f;
+        const float dcOut = sd - st.dcX1 + R * st.dcY1;
+        st.dcX1 = sd;
+        st.dcY1 = dcOut;
+
+        // --- Auto-gain RMS : sortie recalee sur le RMS d'entree (lisse ~50 ms), borne ---
+        const float envCoeff = 1.0f - std::exp (-1.0f / (0.05f * (float) sr));
+        st.inEnv  += (in * in - st.inEnv) * envCoeff;
+        st.outEnv += (dcOut * dcOut - st.outEnv) * envCoeff;
+        const float makeup = juce::jlimit (0.25f, 4.0f, std::sqrt (st.inEnv / (st.outEnv + 1.0e-9f)));
+
+        return dcOut * makeup;
     }
 }
 
@@ -261,6 +307,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
+    // Modele de saturation : Lampe (paires/chaleur), Transfo (impaires/punch), Bande (sombre).
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "saturationType", 1 }, "Sat type",
+        juce::StringArray { "Lampe", "Transfo", "Bande" }, 0));
+
+    // Emphasis grave (facon Bus Force) : dose combien les graves attaquent la saturation.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "saturationEmphasis", 1 }, "Sat emphasis",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
     return { params.begin(), params.end() };
 }
 
@@ -394,6 +452,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     driftShapeSmoothed.reset (sampleRate, smoothTime);
     integritySmoothed.reset (sampleRate, smoothTime);
     saturationSmoothed.reset (sampleRate, smoothTime);
+    saturationEmphasisSmoothed.reset (sampleRate, smoothTime);
     bitcrushAmountSmoothed.reset (sampleRate, smoothTime);
     decimationAmountSmoothed.reset (sampleRate, smoothTime);
     wetGainSmoothed.reset (sampleRate, smoothTime);
@@ -418,6 +477,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     driftShapeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftShape"));
     integritySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("integrity"));
     saturationSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("saturation"));
+    saturationEmphasisSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("saturationEmphasis"));
     bitcrushAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
     decimationAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("wetGain"));
@@ -456,6 +516,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         holdPhaseBus[ch] = 0.0f;
         heldValueBus[ch] = 0.0f;
         decimLpStateBus[ch] = 0.0f;
+        preampState[ch] = PreampState{};
     }
 }
 
@@ -538,7 +599,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     driftShapeSmoothed.setTargetValue (*apvts.getRawParameterValue ("driftShape"));
     integritySmoothed.setTargetValue (*apvts.getRawParameterValue ("integrity"));
     saturationSmoothed.setTargetValue (*apvts.getRawParameterValue ("saturation"));
+    saturationEmphasisSmoothed.setTargetValue (*apvts.getRawParameterValue ("saturationEmphasis"));
     bitcrushAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
+    const int saturationType = (int) *apvts.getRawParameterValue ("saturationType");
     decimationAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setTargetValue (*apvts.getRawParameterValue ("wetGain"));
     syncAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("syncAmount"));
@@ -602,6 +665,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float decimAmount  = decimationAmountSmoothed.getNextValue();
         const float wetGainLin   = wetGainSmoothed.getNextValue();  // Echo volume lineaire, 0 = coupe
         const float saturationAmt = saturationSmoothed.getNextValue();
+        const float saturationEmph = saturationEmphasisSmoothed.getNextValue();
         const float syncAmt      = syncAmountSmoothed.getNextValue();
 
         const float effectiveTimeMs = timeMs * (1.0f - syncAmt) + syncedTimeMs * syncAmt;
@@ -661,7 +725,8 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             auto* data = buffer.getWritePointer (ch);
             // Preampli d'entree : sature le signal des l'entree, avant de le repartir vers
             // le sec, l'echo et la reverbe - c'est l'etage analogique qui colore tout.
-            const float inputSample = preampSaturate (data[n], saturationAmt);
+            const float inputSample = preampProcess (data[n], saturationAmt, saturationType,
+                                                     saturationEmph, preampState[ch], currentSampleRate);
 
             const float delayedSample = delayLine.popSample (ch, channelDelaySamples[ch]);
             float toPush = inputSample + delayedSample * feedbackAmt;
