@@ -662,11 +662,14 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float highBand = wet - lowBand;
             wet = lowBand * lowGain + highBand * highGain;
 
-            // Capture pour la Reinjection croisee (post-Brightness, avant le melange
-            // avec le direct - c'est la traine elle-meme qui boucle, pas le resultat final).
-            crossFeedDelayLine.pushSample (ch, wet);
+            // Reinjection croisee ponderee par Reverbe mix (Option A) : capturee APRES
+            // la mise a l'echelle par reverbMixVal plutot qu'avant, pour que ce bouton
+            // agisse aussi comme un levier naturel sur la boucle croisee - le baisser
+            // calme la reinjection aussi, pas seulement ce qu'on entend en direct.
+            const float wetForMix = wet * reverbMixVal;
+            crossFeedDelayLine.pushSample (ch, wetForMix);
 
-            float mixed = dryData[n] * (1.0f - reverbMixVal) + wet * reverbMixVal
+            float mixed = dryData[n] * (1.0f - reverbMixVal) + wetForMix
                         + wetGainCorrection.getSample (ch, n);
             if (safetyOn)
                 mixed = softSafetyCeiling (mixed, 1.2f);
