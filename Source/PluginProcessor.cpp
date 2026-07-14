@@ -26,6 +26,47 @@ namespace
 
         return sign * crushed;
     }
+
+    // Integrite : sample-and-hold (decimation) + passe-bas qui s'assombrit avec la
+    // quantite + crunch de quantification (bitcrush, plus severe a bas niveau). L'etat
+    // par canal est passe par reference pour pouvoir instancier plusieurs etages
+    // independants (boucle echo ET bus d'effets) sans melanger leurs etats.
+    inline float applyIntegrity (float x, float integrityAmt, float bitcrushAmt, float decimAmount,
+                                 float& holdPhase, float& heldValue, float& decimLpState, double sampleRate)
+    {
+        if (integrityAmt <= 0.0001f)
+            return x;
+
+        // La macro pilote l'intensite globale ; chaque balance individuelle redose la
+        // part de chaque mecanisme dans ce total.
+        const float decimAmt = integrityAmt * decimAmount;
+        const float crushAmt = integrityAmt * bitcrushAmt;
+
+        const float holdSamples = 1.0f + decimAmt * 28.0f;
+        holdPhase += 1.0f / holdSamples;
+        if (holdPhase >= 1.0f)
+        {
+            holdPhase -= 1.0f;
+            heldValue = x;
+        }
+        x = heldValue;
+
+        // La decimation cree des harmoniques inharmoniques, percues comme plus dures/
+        // fortes qu'un simple crunch a niveau egal. Un passe-bas qui s'assombrit avec la
+        // quantite adoucit ce cote agressif sans reduire le volume ni le caractere.
+        const float decimCutoffHz = 18000.0f - decimAmt * 14000.0f;
+        const float decimLpCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * decimCutoffHz / (float) sampleRate);
+        decimLpState += (x - decimLpState) * decimLpCoeff;
+        x = decimLpState;
+
+        const float absVal = std::abs (x);
+        const float lowLevelBoost = juce::jlimit (0.0f, 1.0f, 1.0f - absVal * 4.0f) * crushAmt;
+        const float bits = juce::jlimit (2.0f, 16.0f, 16.0f - crushAmt * 11.0f - lowLevelBoost * 4.0f);
+        const float levels = std::pow (2.0f, bits);
+        x = std::round (x * levels) / levels;
+
+        return x;
+    }
 }
 
 //==============================================================================
@@ -91,7 +132,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "reverbMix", 1 }, "Reverb volume",
-        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f,
+        juce::NormalisableRange<float> (0.0f, 2.0f, 0.001f), 0.5f,
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
@@ -382,6 +423,9 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         holdPhase[ch] = 0.0f;
         heldValue[ch] = 0.0f;
         decimLpState[ch] = 0.0f;
+        holdPhaseBus[ch] = 0.0f;
+        heldValueBus[ch] = 0.0f;
+        decimLpStateBus[ch] = 0.0f;
     }
 }
 
@@ -577,40 +621,13 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // entretient (delay et reverbe qui se parlent, facon Roland RE-201).
             toPush += crossFeedDelayLine.popSample (ch, crossFeedDelaySamples) * crossFeedAmt;
 
-            // Integrite : dégrade ce qui entre dans la mémoire de la boucle, pas le
-            // direct. Chaque passage réinjecte le résultat déjà dégradé, donc les
-            // répétitions s'assalissent progressivement plutôt que d'un coup.
-            if (integrityAmt > 0.0001f)
-            {
-                // La macro pilote l'intensite globale ; chaque balance individuelle
-                // (panneau Advanced) redose la part de chaque mecanisme dans ce total.
-                const float decimAmt = integrityAmt * decimAmount;
-                const float crushAmt = integrityAmt * bitcrushAmt;
-
-                const float holdSamples = 1.0f + decimAmt * 28.0f;
-                holdPhase[ch] += 1.0f / holdSamples;
-                if (holdPhase[ch] >= 1.0f)
-                {
-                    holdPhase[ch] -= 1.0f;
-                    heldValue[ch] = toPush;
-                }
-                toPush = heldValue[ch];
-
-                // La decimation cree des harmoniques inharmoniques, percues comme
-                // plus dures/fortes qu'un simple crunch a niveau egal. Un passe-bas
-                // qui s'assombrit avec la quantite adoucit ce cote agressif sans
-                // reduire le volume ni attenuer le caractere lui-meme.
-                const float decimCutoffHz = 18000.0f - decimAmt * 14000.0f;
-                const float decimLpCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * decimCutoffHz / (float) currentSampleRate);
-                decimLpState[ch] += (toPush - decimLpState[ch]) * decimLpCoeff;
-                toPush = decimLpState[ch];
-
-                const float absVal = std::abs (toPush);
-                const float lowLevelBoost = juce::jlimit (0.0f, 1.0f, 1.0f - absVal * 4.0f) * crushAmt;
-                const float bits = juce::jlimit (2.0f, 16.0f, 16.0f - crushAmt * 11.0f - lowLevelBoost * 4.0f);
-                const float levels = std::pow (2.0f, bits);
-                toPush = std::round (toPush * levels) / levels;
-            }
+            // Integrite dans la boucle : dégrade ce qui entre dans la mémoire du delay,
+            // pas le direct. Chaque passage réinjecte le résultat déjà dégradé, donc les
+            // répétitions s'assalissent PROGRESSIVEMENT (accumulation) plutôt que d'un
+            // coup. Un second étage sur le bus d'effets (cf. passe finale) dégrade en plus
+            // la reverbe, pour que l'Intégrité soit un traitement général et pas delay-only.
+            toPush = applyIntegrity (toPush, integrityAmt, bitcrushAmt, decimAmount,
+                                     holdPhase[ch], heldValue[ch], decimLpState[ch], currentSampleRate);
 
             if (safetyOn)
                 toPush = softSafetyCeiling (toPush, 1.2f);
@@ -634,10 +651,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         }
     }
 
-    // --- Reverbe (v0 : moteur JUCE integre en attendant le reseau custom) ---
-    // Recoit la sortie du Moteur temps (routage serial, coherent avec la future
-    // Reinjection croisee). Caractere n'est qu'une version simplifiee (damping seul)
-    // du futur axe structurel du reseau maison - assume comme placeholder honnete.
+    // --- Reverbe : reseau a retards rebouclés maison (FDN, cf. section tank plus bas) ---
+    // Alimentee par le sec+echo (dryDelayBuf). Taille pilote la decroissance, Caractere
+    // l'amortissement par ligne.
     const float reverbSizeVal   = reverbSizeSmoothed.getNextValue();
     const float reverbCharVal   = reverbCharacterSmoothed.getNextValue();
     const float reverbMixVal    = reverbMixSmoothed.getNextValue();
@@ -797,7 +813,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 fdnTankDelay1[a].pushSample (ch, diffused1);
             }
 
-            data[n] = 0.25f * (raw1[0] + raw1[1] + raw2[0] + raw2[1]);
+            // Makeup +6 dB (0.5 au lieu de 0.25) : la sortie du tank sortait trop basse
+            // pour que Reverb volume la ramene a un niveau audible.
+            data[n] = 0.5f * (raw1[0] + raw1[1] + raw2[0] + raw2[1]);
         }
     }
 
@@ -806,6 +824,14 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float tiltCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * 900.0f / (float) currentSampleRate);
     const float lowGain  = 1.0f - brightnessVal * 0.6f;
     const float highGain = 1.0f + brightnessVal * 0.6f;
+
+    // Etage Integrite du BUS d'effets : ici applique a la sortie reverbe, pour que la
+    // degradation soit audible sur la reverbe et independante du delay (l'echo, lui, est
+    // deja degrade dans la boucle). Valeurs lues au rythme du bloc (l'Integrite ne bouge
+    // pas a l'echantillon pres) - etat par canal separe de celui de la boucle.
+    const float integrityBus = *apvts.getRawParameterValue ("integrity");
+    const float bitcrushBus  = *apvts.getRawParameterValue ("bitcrushAmount");
+    const float decimBus     = *apvts.getRawParameterValue ("decimationAmount");
 
     for (int ch = 0; ch < numChannels; ++ch)
     {
@@ -819,12 +845,16 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float highBand = wet - lowBand;
             wet = lowBand * lowGain + highBand * highGain;
 
-            // Contribution reverbe = humide * Niveau reverbe (reverbMix, desormais un
-            // niveau). Sert aussi de source a la Reinjection croisee (capturee APRES ce
-            // niveau, pour que Reverbe mix reste un levier naturel sur la boucle croisee -
-            // le baisser calme la reinjection). La boucle croisee est independante du Mix
-            // global (elle vit dans le circuit interne, pas dans le dosage de sortie).
-            const float reverbContribution = wet * reverbMixVal;
+            // Contribution reverbe = humide * Reverb volume. Puis étage Intégrité du bus
+            // d'effets : la reverbe est dégradée ici (l'echo l'est déjà dans la boucle),
+            // donc l'Intégrité s'entend sur la reverbe et reste active même sans delay.
+            float reverbContribution = wet * reverbMixVal;
+            reverbContribution = applyIntegrity (reverbContribution, integrityBus, bitcrushBus, decimBus,
+                                                 holdPhaseBus[ch], heldValueBus[ch], decimLpStateBus[ch], currentSampleRate);
+
+            // Sert aussi de source a la Reinjection croisee (capturee APRES le niveau reverbe,
+            // pour que Reverb volume reste un levier naturel sur la boucle croisee). La boucle
+            // croisee est independante du Mix global (circuit interne, pas dosage de sortie).
 
             // Compression locale (Option C) : controle ce qui entre dans la memoire de
             // la boucle des le depart, plutot qu'un plafond qui n'agit qu'a l'extreme.

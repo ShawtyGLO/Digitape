@@ -54,6 +54,12 @@ private:
     float heldValue[2] { 0.0f, 0.0f };
     float decimLpState[2] { 0.0f, 0.0f };
 
+    // Second etage Integrite, sur le bus d'effets (sortie reverbe) : etat separe de la
+    // boucle echo ci-dessus pour ne pas melanger les deux sample-and-hold.
+    float holdPhaseBus[2] { 0.0f, 0.0f };
+    float heldValueBus[2] { 0.0f, 0.0f };
+    float decimLpStateBus[2] { 0.0f, 0.0f };
+
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLine { 192000 };
 
     // Reseau a retards rebouclés maison, remplace juce::dsp::Reverb. Pre-diffusion :
