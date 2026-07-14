@@ -28,6 +28,7 @@
         { "id": "reverbSizeSlider", "label": "Reverbe taille", "group": "reverbe", "x": 275, "y": 50, "w": 90, "h": 90 },
         { "id": "reverbCharacterSlider", "label": "Reverbe caract.", "group": "reverbe", "x": 380, "y": 50, "w": 90, "h": 90 },
         { "id": "reverbMixSlider", "label": "Reverbe mix", "group": "reverbe", "x": 275, "y": 155, "w": 90, "h": 90 },
+        { "id": "outputGainSlider", "label": "Volume sortie", "group": "btn", "x": 470, "y": 155, "w": 90, "h": 90 },
         { "id": "monoBtn", "label": "Mono", "group": "btn", "x": 570, "y": 436, "w": 90, "h": 24 },
         { "id": "safetyBtn", "label": "Sécurité", "group": "btn", "x": 670, "y": 436, "w": 90, "h": 24 },
         { "id": "syncNoteCombo", "label": "Sync division", "group": "temps", "x": 580, "y": 120, "w": 140, "h": 28 },

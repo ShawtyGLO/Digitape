@@ -26,6 +26,7 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     setupKnob (reverbCharacterKnob, "reverbCharacter", "Reverbe caract.");
     setupKnob (reverbMixKnob,       "reverbMix",       "Reverbe mix");
     setupKnob (crossFeedbackKnob,   "crossFeedback",   "Reinjection croisee");
+    setupKnob (outputGainKnob,      "outputGain",      "Volume sortie");
 
     addAndMakeVisible (monoButton);
     monoAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "mono", monoButton);
@@ -97,6 +98,7 @@ void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
     driftShapeKnob.slider.setVisible (!shouldShow); driftShapeKnob.label.setVisible (!shouldShow);
     integrityKnob.slider.setVisible (!shouldShow);  integrityKnob.label.setVisible (!shouldShow);
     crossFeedbackKnob.slider.setVisible (!shouldShow); crossFeedbackKnob.label.setVisible (!shouldShow);
+    outputGainKnob.slider.setVisible (!shouldShow);    outputGainKnob.label.setVisible (!shouldShow);
     wetGainKnob.slider.setVisible (!shouldShow);    wetGainKnob.label.setVisible (!shouldShow);
     syncAmountKnob.slider.setVisible (!shouldShow); syncAmountKnob.label.setVisible (!shouldShow);
     reverbSizeKnob.slider.setVisible (!shouldShow);      reverbSizeKnob.label.setVisible (!shouldShow);
@@ -141,6 +143,7 @@ void DigitapeAudioProcessorEditor::resized()
     placeKnob (driftShapeKnob, UI::ctrl::facade::driftShapeSlider.x, UI::ctrl::facade::driftShapeSlider.y, UI::ctrl::facade::driftShapeSlider.w, UI::ctrl::facade::driftShapeSlider.h);
     placeKnob (integrityKnob,  UI::ctrl::facade::integritySlider.x,  UI::ctrl::facade::integritySlider.y,  UI::ctrl::facade::integritySlider.w,  UI::ctrl::facade::integritySlider.h);
     placeKnob (crossFeedbackKnob, UI::ctrl::facade::crossFeedbackSlider.x, UI::ctrl::facade::crossFeedbackSlider.y, UI::ctrl::facade::crossFeedbackSlider.w, UI::ctrl::facade::crossFeedbackSlider.h);
+    placeKnob (outputGainKnob, UI::ctrl::facade::outputGainSlider.x, UI::ctrl::facade::outputGainSlider.y, UI::ctrl::facade::outputGainSlider.w, UI::ctrl::facade::outputGainSlider.h);
     placeKnob (wetGainKnob,    UI::ctrl::facade::wetGainSlider.x,    UI::ctrl::facade::wetGainSlider.y,    UI::ctrl::facade::wetGainSlider.w,    UI::ctrl::facade::wetGainSlider.h);
     placeKnob (syncAmountKnob, UI::ctrl::facade::syncAmountSlider.x, UI::ctrl::facade::syncAmountSlider.y, UI::ctrl::facade::syncAmountSlider.w, UI::ctrl::facade::syncAmountSlider.h);
     placeKnob (reverbSizeKnob,      UI::ctrl::facade::reverbSizeSlider.x,      UI::ctrl::facade::reverbSizeSlider.y,      UI::ctrl::facade::reverbSizeSlider.w,      UI::ctrl::facade::reverbSizeSlider.h);

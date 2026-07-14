@@ -80,6 +80,11 @@ private:
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> crossFeedDelayLine { 4800 };
     juce::SmoothedValue<float> crossFeedbackSmoothed;
 
+    // Volume de sortie : tout en fin de chaine, pour experimenter avec la saturation
+    // sans se cramer les oreilles - independant de la Securite (qui protege contre
+    // l'emballement numerique, pas contre le niveau d'ecoute choisi).
+    juce::SmoothedValue<float> outputGainSmoothed;
+
     juce::SmoothedValue<float> timeSmoothed, feedbackSmoothed, mixSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed, integritySmoothed;
 
     // Panneau Advanced (v0 en sliders plats, pas encore de repli visuel) : balance

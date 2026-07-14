@@ -34,6 +34,7 @@ namespace UI
             constexpr Rect reverbSizeSlider       {  275.0f,   50.0f,   90.0f,   90.0f };
             constexpr Rect reverbCharacterSlider  {  380.0f,   50.0f,   90.0f,   90.0f };
             constexpr Rect reverbMixSlider        {  275.0f,  155.0f,   90.0f,   90.0f };
+            constexpr Rect outputGainSlider       {  470.0f,  155.0f,   90.0f,   90.0f };
             constexpr Rect monoBtn                {  570.0f,  436.0f,   90.0f,   24.0f };
             constexpr Rect safetyBtn              {  670.0f,  436.0f,   90.0f,   24.0f };
             constexpr Rect syncNoteCombo          {  580.0f,  120.0f,  140.0f,   28.0f };

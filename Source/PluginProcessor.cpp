@@ -5,13 +5,26 @@ namespace
 {
     // Transparent sous le seuil, sature en douceur au-dessus (jamais de clip dur) -
     // borne mathematiquement a ceiling + 1.0 quelle que soit l'ampleur de l'emballement.
+    // Au-dela du seuil, un sursaut de crunch de quantification s'ajoute a la saturation,
+    // proportionnel a l'ampleur du depassement : la saturation est ce qui limite
+    // reellement (le bitcrush seul ne plafonne pas l'amplitude), le crunch lui donne
+    // la personnalite de la machine plutot qu'un son de limiteur generique.
     inline float softSafetyCeiling (float x, float ceiling)
     {
         const float absX = std::abs (x);
         if (absX <= ceiling)
             return x;
+
+        const float excess = absX - ceiling;
         const float sign = x < 0.0f ? -1.0f : 1.0f;
-        return sign * (ceiling + std::tanh (absX - ceiling));
+        const float saturated = ceiling + std::tanh (excess);
+
+        const float crushAmount = juce::jlimit (0.0f, 1.0f, excess * 3.0f);
+        const float bits = juce::jlimit (3.0f, 16.0f, 16.0f - crushAmount * 13.0f);
+        const float levels = std::pow (2.0f, bits);
+        const float crushed = std::round (saturated * levels) / levels;
+
+        return sign * crushed;
     }
 }
 
@@ -112,6 +125,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "outputGain", 1 }, "Volume sortie",
+        juce::NormalisableRange<float> (-36.0f, 6.0f, 0.01f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("dB")));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "feedback", 1 }, "Reinjection",
@@ -286,6 +304,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbLowpassSmoothed.reset (sampleRate, smoothTime);
     reverbBrightnessSmoothed.reset (sampleRate, smoothTime);
     crossFeedbackSmoothed.reset (sampleRate, smoothTime);
+    outputGainSmoothed.reset (sampleRate, smoothTime);
 
     timeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("time"));
     feedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("feedback"));
@@ -308,6 +327,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbLowpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbLowpass"));
     reverbBrightnessSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbBrightness"));
     crossFeedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("crossFeedback"));
+    outputGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("outputGain"));
 
     for (int ch = 0; ch < 2; ++ch)
     {
@@ -405,6 +425,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     crossFeedbackSmoothed.setTargetValue (*apvts.getRawParameterValue ("crossFeedback"));
     const float crossFeedAmt = crossFeedbackSmoothed.getNextValue();
     const float crossFeedDelaySamples = 0.02f * (float) currentSampleRate;
+    outputGainSmoothed.setTargetValue (*apvts.getRawParameterValue ("outputGain"));
 
     // Sync tempo : calculee une fois par bloc (le tempo hote ne bouge pas a l'echantillon
     // pres), verrouillage direct sur la division+saveur choisie plutot qu'une recherche
@@ -649,7 +670,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                         + wetGainCorrection.getSample (ch, n);
             if (safetyOn)
                 mixed = softSafetyCeiling (mixed, 1.2f);
-            data[n] = mixed;
+
+            // Volume de sortie : tout en fin de chaine, apres la Securite - controle
+            // d'ecoute pur, independant de ce qui protege contre l'emballement interne.
+            const float outputGainLin = juce::Decibels::decibelsToGain (outputGainSmoothed.getNextValue());
+            data[n] = mixed * outputGainLin;
         }
     }
 }
