@@ -369,6 +369,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     const int numChannels = juce::jmin (buffer.getNumChannels(), 2);
 
+    // Ecart introduit par Niveau repetitions (wetGain), isole de ce qui alimente la
+    // Reverbe - rempli dans la boucle Moteur temps, rajoute apres la Reverbe.
+    juce::AudioBuffer<float> wetGainCorrection (2, numSamples);
+    wetGainCorrection.clear();
+
     // Les sliders ne changent que la valeur cible de l'APVTS : sans ces lignes,
     // les SmoothedValue restent figes sur l'etat du tout premier prepareToPlay
     // et ignorent tout ce que l'utilisateur regle ensuite dans l'interface.
@@ -538,10 +543,15 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
             delayLine.pushSample (ch, toPush);
 
-            // Niveau des repetitions : trim independant du Mix, applique seulement a la
-            // sortie (jamais a ce qui repart dans la boucle) pour ne pas interferer avec
-            // la stabilite du feedback ni avec la Securite.
-            float outSample = inputSample * (1.0f - mixAmt) + delayedSample * wetGainLin * mixAmt;
+            // Niveau des repetitions : NE doit affecter que la sortie finale, pas ce qui
+            // alimente la Reverbe (routage serial) - sinon impossible de doser Moteur
+            // temps et Reverbe independamment. data[n] reste neutre (sans wetGain) pour
+            // que la Reverbe recoive toujours le meme signal ; l'ecart introduit par
+            // wetGain est isole et rajoute seulement apres la Reverbe, tout a la fin.
+            const float neutralOut = inputSample * (1.0f - mixAmt) + delayedSample * mixAmt;
+            wetGainCorrection.setSample (ch, n, delayedSample * mixAmt * (wetGainLin - 1.0f));
+
+            float outSample = neutralOut;
             if (safetyOn)
                 outSample = softSafetyCeiling (outSample, 1.2f);
             data[n] = outSample;
@@ -635,7 +645,8 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // avec le direct - c'est la traine elle-meme qui boucle, pas le resultat final).
             crossFeedDelayLine.pushSample (ch, wet);
 
-            float mixed = dryData[n] * (1.0f - reverbMixVal) + wet * reverbMixVal;
+            float mixed = dryData[n] * (1.0f - reverbMixVal) + wet * reverbMixVal
+                        + wetGainCorrection.getSample (ch, n);
             if (safetyOn)
                 mixed = softSafetyCeiling (mixed, 1.2f);
             data[n] = mixed;
