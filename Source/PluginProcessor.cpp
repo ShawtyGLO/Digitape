@@ -277,15 +277,27 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         d.prepare (spec);
         d.reset();
     }
-    for (auto& d : fdnTankAllpass)
+    for (auto& d : fdnTankAllpass1)
     {
-        d.setMaximumDelayInSamples ((int) (0.05 * sampleRate));
+        d.setMaximumDelayInSamples ((int) (0.1 * sampleRate));
         d.prepare (spec);
         d.reset();
     }
-    for (auto& d : fdnTankDelay)
+    for (auto& d : fdnTankDelay1)
     {
-        d.setMaximumDelayInSamples ((int) (0.3 * sampleRate));
+        d.setMaximumDelayInSamples ((int) (0.2 * sampleRate));
+        d.prepare (spec);
+        d.reset();
+    }
+    for (auto& d : fdnTankAllpass2)
+    {
+        d.setMaximumDelayInSamples ((int) (0.1 * sampleRate));
+        d.prepare (spec);
+        d.reset();
+    }
+    for (auto& d : fdnTankDelay2)
+    {
+        d.setMaximumDelayInSamples ((int) (0.2 * sampleRate));
         d.prepare (spec);
         d.reset();
     }
@@ -630,22 +642,27 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         fdnAllpassSamples[i] = fdnAllpassTimesMs[i] * 0.001f * (float) currentSampleRate;
 
     // Tank a 2 bras croises (figure-8, lignee Lexicon/EMT/Dattorro) : chaque bras a
-    // son propre allpass integre a la boucle (diffuse a chaque tour) suivi d'une
-    // longue ligne a retard tapee a deux points (tap principal reinjecte + tap
-    // secondaire pour la sortie seulement) - casse la periodicite qu'un simple
-    // aller-retour de ligne courte laisse entendre.
-    static constexpr float fdnTankApTimesMs[2]    = { 15.3f, 22.7f };
-    static constexpr float fdnTankDelayTimesMs[2] = { 141.7f, 168.9f };
-    static constexpr float fdnTankTap2Frac[2]     = { 0.47f, 0.61f };
-    constexpr float fdnTankApCoeff = 0.5f;
+    // DEUX etages allpass+delay en serie (pas un seul) - premier passage : diffuse ->
+    // longue ligne 1 -> amortissement/gain (seul point de perte d'energie du bras) ->
+    // second passage : diffuse a nouveau -> longue ligne 2 -> ressort vers le bras
+    // oppose. Deux points de diffusion et deux longueurs par tour, plutot qu'un aller-
+    // retour unique qui s'entend comme un delay/ping-pong.
+    static constexpr float fdnTankAp1TimesMs[2]    = { 18.9f, 26.1f };
+    static constexpr float fdnTankDelay1TimesMs[2] = { 118.6f, 105.1f };
+    static constexpr float fdnTankAp2TimesMs[2]    = { 61.3f, 74.9f };
+    static constexpr float fdnTankDelay2TimesMs[2] = { 89.7f, 71.3f };
+    constexpr float fdnTankAp1Coeff = 0.7f;
+    constexpr float fdnTankAp2Coeff = 0.5f;
 
-    float fdnTankApSamples[2], fdnTankDelaySamples[2], fdnTankTap2Samples[2], fdnTankFeedbackGain[2];
+    float fdnTankAp1Samples[2], fdnTankDelay1Samples[2], fdnTankAp2Samples[2], fdnTankDelay2Samples[2], fdnTankFeedbackGain[2];
     for (int a = 0; a < 2; ++a)
     {
-        fdnTankApSamples[a]    = fdnTankApTimesMs[a]    * 0.001f * (float) currentSampleRate;
-        fdnTankDelaySamples[a] = fdnTankDelayTimesMs[a] * 0.001f * (float) currentSampleRate;
-        fdnTankTap2Samples[a]  = fdnTankDelaySamples[a] * fdnTankTap2Frac[a];
-        const float roundTripSeconds = (fdnTankApTimesMs[a] + fdnTankDelayTimesMs[a]) * 0.001f;
+        fdnTankAp1Samples[a]    = fdnTankAp1TimesMs[a]    * 0.001f * (float) currentSampleRate;
+        fdnTankDelay1Samples[a] = fdnTankDelay1TimesMs[a] * 0.001f * (float) currentSampleRate;
+        fdnTankAp2Samples[a]    = fdnTankAp2TimesMs[a]    * 0.001f * (float) currentSampleRate;
+        fdnTankDelay2Samples[a] = fdnTankDelay2TimesMs[a] * 0.001f * (float) currentSampleRate;
+        const float roundTripSeconds = (fdnTankAp1TimesMs[a] + fdnTankDelay1TimesMs[a]
+                                       + fdnTankAp2TimesMs[a] + fdnTankDelay2TimesMs[a]) * 0.001f;
         fdnTankFeedbackGain[a] = std::pow (10.0f, -3.0f * roundTripSeconds / fdnDecaySeconds);
     }
 
@@ -718,34 +735,46 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 diffused = -fdnAllpassCoeff * w + wD;
             }
 
-            // Tank a 2 bras croises : chaque bras lit sa longue ligne (tap principal,
-            // celui qui reinjecte), l'amortit, applique son gain de decroissance - ces
-            // sorties nourrissent le bras OPPOSE (figure-8) plutot que de se remixer
-            // entre elles via une matrice, ce qui est deja suffisant pour dissoudre la
-            // periodicite avec seulement 2 lignes.
-            float armOut[2], tap2[2];
+            // Tank a 2 bras croises, DEUX etages allpass+delay chacun (lignee
+            // Lexicon/EMT/Dattorro) : lecture de la ligne 1 -> amortissement/gain
+            // (seul point de perte d'energie du bras) -> diffusion 2 -> ligne 2 -> ce
+            // qui ressort nourrit le bras OPPOSE. Le tap de sortie prend les DEUX
+            // lignes (positions differentes dans la boucle) plutot qu'un seul point,
+            // pour une densite d'echos que le simple aller-retour ne donnait pas.
+            float raw1[2], fed1[2], raw2[2];
             for (int a = 0; a < 2; ++a)
             {
-                const float tankRaw = fdnTankDelay[a].popSample (ch, fdnTankDelaySamples[a]);
-                fdnTankDampState[a][ch] += (tankRaw - fdnTankDampState[a][ch]) * fdnDampCoeff;
-                armOut[a] = fdnTankDampState[a][ch] * fdnTankFeedbackGain[a];
-                tap2[a] = fdnTankDelay[a].popSample (ch, fdnTankTap2Samples[a]);
+                raw1[a] = fdnTankDelay1[a].popSample (ch, fdnTankDelay1Samples[a]);
+                fdnTankDampState[a][ch] += (raw1[a] - fdnTankDampState[a][ch]) * fdnDampCoeff;
+                fed1[a] = fdnTankDampState[a][ch] * fdnTankFeedbackGain[a];
+
+                raw2[a] = fdnTankDelay2[a].popSample (ch, fdnTankDelay2Samples[a]);
             }
 
-            // Chaque bras recoit la moitie du signal pre-diffuse + la sortie du bras
-            // oppose, puis retraverse SON PROPRE allpass avant de repartir dans sa
-            // ligne - la diffusion se refait a chaque tour, pas juste a l'entree du tank.
+            // Deuxieme diffusion, mi-parcours, avant la seconde ligne.
             for (int a = 0; a < 2; ++a)
             {
-                const float armIn = 0.5f * diffused + armOut[1 - a];
-                const float wD = fdnTankAllpass[a].popSample (ch, fdnTankApSamples[a]);
-                const float w  = armIn + fdnTankApCoeff * wD;
-                fdnTankAllpass[a].pushSample (ch, w);
-                const float diffusedArm = -fdnTankApCoeff * w + wD;
-                fdnTankDelay[a].pushSample (ch, diffusedArm);
+                const float wD2 = fdnTankAllpass2[a].popSample (ch, fdnTankAp2Samples[a]);
+                const float w2  = fed1[a] + fdnTankAp2Coeff * wD2;
+                fdnTankAllpass2[a].pushSample (ch, w2);
+                const float diffused2 = -fdnTankAp2Coeff * w2 + wD2;
+                fdnTankDelay2[a].pushSample (ch, diffused2);
             }
 
-            data[n] = 0.35f * (armOut[0] + armOut[1]) + 0.15f * (tap2[0] + tap2[1]);
+            // Chaque bras recoit la moitie du signal pre-diffuse + la sortie de la
+            // ligne 2 du bras OPPOSE (figure-8), traverse sa premiere diffusion, part
+            // dans sa premiere ligne.
+            for (int a = 0; a < 2; ++a)
+            {
+                const float armIn = 0.5f * diffused + raw2[1 - a];
+                const float wD1 = fdnTankAllpass1[a].popSample (ch, fdnTankAp1Samples[a]);
+                const float w1  = armIn + fdnTankAp1Coeff * wD1;
+                fdnTankAllpass1[a].pushSample (ch, w1);
+                const float diffused1 = -fdnTankAp1Coeff * w1 + wD1;
+                fdnTankDelay1[a].pushSample (ch, diffused1);
+            }
+
+            data[n] = 0.25f * (raw1[0] + raw1[1] + raw2[0] + raw2[1]);
         }
     }
 
