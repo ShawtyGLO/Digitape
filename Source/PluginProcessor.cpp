@@ -200,7 +200,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "width", 1 }, "Largeur",
-        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f,
+        juce::NormalisableRange<float> (0.0f, 2.0f, 0.001f), 0.3f,
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
@@ -417,6 +417,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     driftPhase = 0.0f;
     steppedGlideL = 0.0f;
     steppedGlideR = 0.0f;
+    widthDriftPhase = 0.0f;
 
     for (int ch = 0; ch < 2; ++ch)
     {
@@ -578,8 +579,19 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         if (driftPhase >= 1.0f)
             driftPhase -= 1.0f;
 
-        float driftPhaseR = driftPhase + widthAmt * 0.5f;
-        if (driftPhaseR >= 1.0f)
+        // Largeur 0-100% : dephasage statique du canal droit, jusqu'a l'opposition totale
+        // a 100% (0.5 cycle). Au-dela, le dephasage seul repartirait vers l'alignement -
+        // on ajoute donc une legere divergence de VITESSE (le canal droit derive un peu
+        // plus vite), facon chorus : la relation de phase L/R evolue en continu au lieu
+        // d'etre figee. widthDriftPhase est cet ecart de phase qui tourne lentement.
+        const float phaseOffset = juce::jmin (widthAmt, 1.0f) * 0.5f;
+        const float extraWidth  = juce::jmax (0.0f, widthAmt - 1.0f);   // 0..1 sur 100-200%
+        widthDriftPhase += rateHz * extraWidth * 0.2f / (float) currentSampleRate;
+        if (widthDriftPhase >= 1.0f)
+            widthDriftPhase -= 1.0f;
+
+        float driftPhaseR = driftPhase + phaseOffset + widthDriftPhase;
+        while (driftPhaseR >= 1.0f)
             driftPhaseR -= 1.0f;
 
         const float lfoSmoothL = std::sin (driftPhase  * juce::MathConstants<float>::twoPi);

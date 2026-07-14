@@ -46,6 +46,11 @@ private:
     float driftPhase { 0.0f };
     float steppedGlideL { 0.0f }, steppedGlideR { 0.0f };
 
+    // Largeur au-dela de 100% : phase de derive supplementaire du canal droit, qui tourne
+    // lentement quand Largeur depasse 100% (divergence de vitesse L/R facon chorus). Etat
+    // persistant, accumule d'un bloc a l'autre - un simple offset recalcule ne suffirait pas.
+    float widthDriftPhase { 0.0f };
+
     // Integrite : crunch de quantification (+ severe a bas niveau) et decimation
     // sample-and-hold, appliques a ce qui entre dans la memoire de la boucle.
     // holdPhase est un accumulateur continu (pas un compteur entier) pour eviter
