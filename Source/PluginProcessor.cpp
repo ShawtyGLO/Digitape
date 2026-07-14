@@ -260,8 +260,9 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     preDelayLine.prepare (spec);
     preDelayLine.reset();
 
-    crossFeedBuffer.setSize (2, samplesPerBlock);
-    crossFeedBuffer.clear();
+    crossFeedDelayLine.setMaximumDelayInSamples ((int) (0.05 * sampleRate));
+    crossFeedDelayLine.prepare (spec);
+    crossFeedDelayLine.reset();
 
     const double smoothTime = 0.02;
     timeSmoothed.reset (sampleRate, smoothTime);
@@ -398,6 +399,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     reverbBrightnessSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbBrightness"));
     crossFeedbackSmoothed.setTargetValue (*apvts.getRawParameterValue ("crossFeedback"));
     const float crossFeedAmt = crossFeedbackSmoothed.getNextValue();
+    const float crossFeedDelaySamples = 0.02f * (float) currentSampleRate;
 
     // Sync tempo : calculee une fois par bloc (le tempo hote ne bouge pas a l'echantillon
     // pres), verrouillage direct sur la division+saveur choisie plutot qu'une recherche
@@ -490,12 +492,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float delayedSample = delayLine.popSample (ch, channelDelaySamples[ch]);
             float toPush = inputSample + delayedSample * feedbackAmt;
 
-            // Reinjection croisee : la traine humide de la Reverbe du bloc precedent
-            // revient se faire attraper par le Moteur temps. A zero, chaine propre ;
-            // pousse, generateur ambiant qui s'auto-entretient (delay et reverbe qui se
-            // parlent, facon Roland RE-201). Latence d'un bloc, cf. commentaire du membre.
-            if (crossFeedAmt > 0.0001f && n < crossFeedBuffer.getNumSamples())
-                toPush += crossFeedBuffer.getSample (ch, n) * crossFeedAmt;
+            // Reinjection croisee : la traine humide de la Reverbe (avec ~20ms de retard
+            // fixe, cf. commentaire du membre) revient se faire attraper par le Moteur
+            // temps. A zero, chaine propre ; pousse, generateur ambiant qui s'auto-
+            // entretient (delay et reverbe qui se parlent, facon Roland RE-201).
+            toPush += crossFeedDelayLine.popSample (ch, crossFeedDelaySamples) * crossFeedAmt;
 
             // Integrite : dégrade ce qui entre dans la mémoire de la boucle, pas le
             // direct. Chaque passage réinjecte le résultat déjà dégradé, donc les
@@ -630,10 +631,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float highBand = wet - lowBand;
             wet = lowBand * lowGain + highBand * highGain;
 
-            // Capture pour la Reinjection croisee du bloc SUIVANT (post-Brightness,
-            // avant le melange avec le direct - c'est la traine elle-meme qui boucle).
-            if (n < crossFeedBuffer.getNumSamples())
-                crossFeedBuffer.setSample (ch, n, wet);
+            // Capture pour la Reinjection croisee (post-Brightness, avant le melange
+            // avec le direct - c'est la traine elle-meme qui boucle, pas le resultat final).
+            crossFeedDelayLine.pushSample (ch, wet);
 
             float mixed = dryData[n] * (1.0f - reverbMixVal) + wet * reverbMixVal;
             if (safetyOn)
