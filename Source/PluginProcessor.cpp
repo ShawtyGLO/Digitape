@@ -613,8 +613,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float fdnDampCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * fdnDampCutoffHz / (float) currentSampleRate);
     const float fdnDecaySeconds = juce::jmap (reverbSizeVal, 0.0f, 1.0f, 0.3f, 8.0f);
 
-    static constexpr float fdnAllpassTimesMs[4] = { 4.3f, 7.9f, 11.7f, 3.1f };
-    static constexpr float fdnTankTimesMs[4]    = { 29.7f, 37.1f, 41.3f, 47.9f };
+    // Temps espaces sans rapports simples entre eux (evite les recoupements qui
+    // creaient une resonance isolee trop marquee) et allonges (plus de densite
+    // modale, moins de flutter-echo audible, sensation de piece plus grande).
+    static constexpr float fdnAllpassTimesMs[4] = { 5.3f, 8.9f, 13.1f, 17.9f };
+    static constexpr float fdnTankTimesMs[4]    = { 53.3f, 67.1f, 79.7f, 96.9f };
     constexpr float fdnAllpassCoeff = 0.6f;
 
     float fdnAllpassSamples[4], fdnTankSamples[4], fdnFeedbackGain[4];
@@ -709,7 +712,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             for (int i = 0; i < 4; ++i)
                 fdnTankDelay[i].pushSample (ch, tankFed[i] - 0.5f * tankSum + diffused);
 
-            data[n] = 0.25f * (tankRaw[0] + tankRaw[1] + tankRaw[2] + tankRaw[3]);
+            // Tap de sortie pris apres l'amortissement (pas le signal brut de la ligne) :
+            // chaque echo hérite du filtrage au lieu de rester plein-spectre, ce qui
+            // attenue le cote "cloche/metallique" percu sur les premieres reflexions.
+            data[n] = 0.25f * (fdnTankDampState[0][ch] + fdnTankDampState[1][ch]
+                              + fdnTankDampState[2][ch] + fdnTankDampState[3][ch]);
         }
     }
 
