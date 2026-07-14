@@ -421,18 +421,27 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     const int numChannels = juce::jmin (buffer.getNumChannels(), 2);
 
-    // Ecart introduit par Niveau repetitions (wetGain), isole de ce qui alimente la
-    // Reverbe - rempli dans la boucle Moteur temps, rajoute apres la Reverbe.
-    juce::AudioBuffer<float> wetGainCorrection (2, numSamples);
-    wetGainCorrection.clear();
+    // Bouton "Mix" = Dry/Wet GLOBAL du plugin (concept d'origine, cf. Digitape.md) : a
+    // 0% signal sec pur (aucun effet), a 100% chaine d'effets complete. Le dosage entre
+    // les deux effets se fait par des niveaux independants - Niveau repetitions (delay)
+    // et Reverbe mix (reverbe, desormais un niveau, plus un dry/wet interne redondant
+    // avec le Mix global).
+    //
+    // directOutBuf : part NON-reverbe de la sortie, deja soumise au Dry/Wet global
+    // (sec attenue par 1-Mix + repetitions du delay attenuees par Mix). Le terme reverbe
+    // s'ajoute dans la passe finale (il n'est pret qu'apres le moteur de reverbe).
+    juce::AudioBuffer<float> directOutBuf (2, numSamples);
+    directOutBuf.clear();
 
-    // Ce qui alimente le MOTEUR de reverbe, distinct du son direct (le melange
-    // delay/dry que l'utilisateur entend). La reverbe recoit toujours le signal sec
-    // en entier et immediatement (son attaque n'est jamais repoussee par le temps de
-    // delay ni la Sync), plus les repetitions du delay par-dessus quand le Mix est
-    // ouvert - donc quand le delay est actif il continue de se reverberer (caractere
-    // ambiant RE-201), mais couper le delay rend la reverbe totalement independante
-    // du Moteur temps. Rempli dans la boucle Moteur temps ci-dessous.
+    // Valeur du Dry/Wet global par echantillon (identique aux deux canaux), relue dans
+    // la passe finale ou le terme reverbe recoit le meme dosage global.
+    juce::AudioBuffer<float> globalMixBuf (1, numSamples);
+    globalMixBuf.clear();
+
+    // Entree du MOTEUR de reverbe : signal sec complet et immediat (attaque jamais
+    // repoussee par le temps de delay ni la Sync) + repetitions du delay a leur Niveau.
+    // Quand le delay est actif il se reverbere aussi ; a Niveau repetitions au minimum,
+    // la reverbe ne travaille quasiment que le sec. Rempli dans la boucle Moteur temps.
     juce::AudioBuffer<float> reverbInput (2, numSamples);
     reverbInput.clear();
 
@@ -505,7 +514,8 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     {
         const float timeMs      = timeSmoothed.getNextValue();
         const float feedbackAmt = feedbackSmoothed.getNextValue();
-        const float mixAmt      = mixSmoothed.getNextValue();
+        const float globalMix   = mixSmoothed.getNextValue();   // Dry/Wet GLOBAL du plugin
+        globalMixBuf.setSample (0, n, globalMix);
         const float rateHz      = driftRateSmoothed.getNextValue();
         const float depthAmt    = driftDepthSmoothed.getNextValue();
         const float widthAmt    = widthSmoothed.getNextValue();
@@ -606,27 +616,21 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
             delayLine.pushSample (ch, toPush);
 
-            // Niveau des repetitions : NE doit affecter que la sortie finale, pas ce qui
-            // alimente la Reverbe (routage serial) - sinon impossible de doser Moteur
-            // temps et Reverbe independamment. data[n] reste neutre (sans wetGain) pour
-            // que la Reverbe recoive toujours le meme signal ; l'ecart introduit par
-            // wetGain est isole et rajoute seulement apres la Reverbe, tout a la fin.
-            const float neutralOut = inputSample * (1.0f - mixAmt) + delayedSample * mixAmt;
-            wetGainCorrection.setSample (ch, n, delayedSample * mixAmt * (wetGainLin - 1.0f));
+            // Repetitions du delay a leur Niveau (Niveau repetitions). Le Dry/Wet global
+            // (Mix) ne dose que la sortie, pas la boucle : sec attenue par (1-Mix) +
+            // repetitions attenuees par Mix. Le terme reverbe s'ajoute en fin de chaine.
+            const float delayWet = delayedSample * wetGainLin;
+            float directOut = inputSample * (1.0f - globalMix) + delayWet * globalMix;
+            if (safetyOn)
+                directOut = softSafetyCeiling (directOut, 1.2f);
+            directOutBuf.setSample (ch, n, directOut);
 
-            // Entree de la reverbe : signal sec complet (toujours, quel que soit le Mix
-            // delay) + les repetitions du delay. A Mix=0 c'est le sec pur (reverbe
-            // strictement independante du temps de delay) ; a Mix ouvert le delay se
-            // reverbere en plus, sans jamais retarder l'attaque du sec.
-            float reverbInSample = inputSample + delayedSample * mixAmt;
+            // Entree du moteur de reverbe : sec complet immediat + repetitions du delay a
+            // leur Niveau (jamais ponderees par le Mix global, qui ne dose que la sortie).
+            float reverbInSample = inputSample + delayWet;
             if (safetyOn)
                 reverbInSample = softSafetyCeiling (reverbInSample, 1.2f);
             reverbInput.setSample (ch, n, reverbInSample);
-
-            float outSample = neutralOut;
-            if (safetyOn)
-                outSample = softSafetyCeiling (outSample, 1.2f);
-            data[n] = outSample;
         }
     }
 
@@ -685,8 +689,6 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         fdnTankFeedbackGain[a] = std::pow (10.0f, -3.0f * roundTripSeconds / fdnDecaySeconds);
     }
 
-    juce::AudioBuffer<float> reverbDry;
-    reverbDry.makeCopyOf (buffer, true);
 
     // Etages d'entree : Transient (adoucit l'attaque courte pour une reverbe plus
     // ambiante) -> Input HP/LP (evite l'engorgement grave/aigu dans le reservoir) ->
@@ -714,9 +716,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         for (int ch = 0; ch < numChannels; ++ch)
         {
             auto* data = buffer.getWritePointer (ch);
-            // Le moteur de reverbe lit reverbInput (sec + repetitions), pas le son direct
-            // deja capture dans reverbDry - c'est ce qui decouple l'attaque de la reverbe
-            // du temps de delay.
+            // Le moteur de reverbe lit reverbInput (sec + repetitions), independant de la
+            // sortie directe (directOutBuf) - c'est ce qui decouple l'attaque de la
+            // reverbe du temps de delay.
             float x = reverbInput.getSample (ch, n);
 
             const float absX = std::abs (x);
@@ -809,7 +811,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     for (int ch = 0; ch < numChannels; ++ch)
     {
         auto* data = buffer.getWritePointer (ch);
-        const auto* dryData = reverbDry.getReadPointer (ch);
+        const auto* directData = directOutBuf.getReadPointer (ch);
         for (int n = 0; n < numSamples; ++n)
         {
             float wet = data[n];
@@ -818,16 +820,17 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float highBand = wet - lowBand;
             wet = lowBand * lowGain + highBand * highGain;
 
-            // Reinjection croisee ponderee par Reverbe mix (Option A) : capturee APRES
-            // la mise a l'echelle par reverbMixVal plutot qu'avant, pour que ce bouton
-            // agisse aussi comme un levier naturel sur la boucle croisee - le baisser
-            // calme la reinjection aussi, pas seulement ce qu'on entend en direct.
-            const float wetForMix = wet * reverbMixVal;
+            // Contribution reverbe = humide * Niveau reverbe (reverbMix, desormais un
+            // niveau). Sert aussi de source a la Reinjection croisee (capturee APRES ce
+            // niveau, pour que Reverbe mix reste un levier naturel sur la boucle croisee -
+            // le baisser calme la reinjection). La boucle croisee est independante du Mix
+            // global (elle vit dans le circuit interne, pas dans le dosage de sortie).
+            const float reverbContribution = wet * reverbMixVal;
 
             // Compression locale (Option C) : controle ce qui entre dans la memoire de
             // la boucle des le depart, plutot qu'un plafond qui n'agit qu'a l'extreme.
             // Seuil/ratio/temps fixes en interne, pas exposes a l'utilisateur.
-            const float compInputLevel = std::abs (wetForMix);
+            const float compInputLevel = std::abs (reverbContribution);
             const float compCoeff = (compInputLevel > crossFeedCompEnv[ch]) ? compAttackCoeff : compReleaseCoeff;
             crossFeedCompEnv[ch] += (compInputLevel - crossFeedCompEnv[ch]) * compCoeff;
 
@@ -839,10 +842,13 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 compGain = juce::Decibels::decibelsToGain (-reductionDb);
             }
 
-            crossFeedDelayLine.pushSample (ch, wetForMix * compGain);
+            crossFeedDelayLine.pushSample (ch, reverbContribution * compGain);
 
-            float mixed = dryData[n] * (1.0f - reverbMixVal) + wetForMix
-                        + wetGainCorrection.getSample (ch, n);
+            // Sortie = part non-reverbe deja dosee par le Mix global (directData) + terme
+            // reverbe dose par le meme Mix global. A Mix=0 : directData=sec pur et ce
+            // terme=0 -> sortie strictement seche. A Mix=1 : sec efface, delay+reverbe.
+            const float gm = globalMixBuf.getSample (0, n);
+            float mixed = directData[n] + reverbContribution * gm;
             if (safetyOn)
                 mixed = softSafetyCeiling (mixed, 1.2f);
 
