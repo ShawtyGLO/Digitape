@@ -277,6 +277,12 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         d.prepare (spec);
         d.reset();
     }
+    for (auto& d : fdnTankAllpass)
+    {
+        d.setMaximumDelayInSamples ((int) (0.05 * sampleRate));
+        d.prepare (spec);
+        d.reset();
+    }
     for (auto& d : fdnTankDelay)
     {
         d.setMaximumDelayInSamples ((int) (0.3 * sampleRate));
@@ -607,26 +613,40 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float brightnessVal   = reverbBrightnessSmoothed.getNextValue();
 
     // FDN : Caractere pilote l'amortissement (cristallin=aigus preserves, casse=sombre) ;
-    // Taille/Decroissance pilote un temps de decroissance (RT60-like) commun aux 4 lignes,
-    // chacune avec le gain de reinjection qui lui correspond compte tenu de sa longueur.
+    // Taille/Decroissance pilote un temps de decroissance (RT60-like) commun aux deux
+    // bras du tank, chacun avec le gain de reinjection qui lui correspond compte tenu
+    // de sa longueur.
     const float fdnDampCutoffHz = juce::jmap (reverbCharVal, 0.0f, 1.0f, 16000.0f, 1500.0f);
     const float fdnDampCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * fdnDampCutoffHz / (float) currentSampleRate);
     const float fdnDecaySeconds = juce::jmap (reverbSizeVal, 0.0f, 1.0f, 0.3f, 8.0f);
 
-    // Temps espaces sans rapports simples entre eux (evite les recoupements qui
-    // creaient une resonance isolee trop marquee) et allonges (plus de densite
-    // modale, moins de flutter-echo audible, sensation de piece plus grande).
+    // Pre-diffusion (inchangee) : 4 allpass en serie, temps espaces sans rapports
+    // simples entre eux.
     static constexpr float fdnAllpassTimesMs[4] = { 5.3f, 8.9f, 13.1f, 17.9f };
-    static constexpr float fdnTankTimesMs[4]    = { 53.3f, 67.1f, 79.7f, 96.9f };
     constexpr float fdnAllpassCoeff = 0.6f;
 
-    float fdnAllpassSamples[4], fdnTankSamples[4], fdnFeedbackGain[4];
+    float fdnAllpassSamples[4];
     for (int i = 0; i < 4; ++i)
-    {
         fdnAllpassSamples[i] = fdnAllpassTimesMs[i] * 0.001f * (float) currentSampleRate;
-        fdnTankSamples[i]    = fdnTankTimesMs[i]    * 0.001f * (float) currentSampleRate;
-        const float lineTimeSeconds = fdnTankTimesMs[i] * 0.001f;
-        fdnFeedbackGain[i] = std::pow (10.0f, -3.0f * lineTimeSeconds / fdnDecaySeconds);
+
+    // Tank a 2 bras croises (figure-8, lignee Lexicon/EMT/Dattorro) : chaque bras a
+    // son propre allpass integre a la boucle (diffuse a chaque tour) suivi d'une
+    // longue ligne a retard tapee a deux points (tap principal reinjecte + tap
+    // secondaire pour la sortie seulement) - casse la periodicite qu'un simple
+    // aller-retour de ligne courte laisse entendre.
+    static constexpr float fdnTankApTimesMs[2]    = { 15.3f, 22.7f };
+    static constexpr float fdnTankDelayTimesMs[2] = { 141.7f, 168.9f };
+    static constexpr float fdnTankTap2Frac[2]     = { 0.47f, 0.61f };
+    constexpr float fdnTankApCoeff = 0.5f;
+
+    float fdnTankApSamples[2], fdnTankDelaySamples[2], fdnTankTap2Samples[2], fdnTankFeedbackGain[2];
+    for (int a = 0; a < 2; ++a)
+    {
+        fdnTankApSamples[a]    = fdnTankApTimesMs[a]    * 0.001f * (float) currentSampleRate;
+        fdnTankDelaySamples[a] = fdnTankDelayTimesMs[a] * 0.001f * (float) currentSampleRate;
+        fdnTankTap2Samples[a]  = fdnTankDelaySamples[a] * fdnTankTap2Frac[a];
+        const float roundTripSeconds = (fdnTankApTimesMs[a] + fdnTankDelayTimesMs[a]) * 0.001f;
+        fdnTankFeedbackGain[a] = std::pow (10.0f, -3.0f * roundTripSeconds / fdnDecaySeconds);
     }
 
     juce::AudioBuffer<float> reverbDry;
@@ -698,25 +718,34 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 diffused = -fdnAllpassCoeff * w + wD;
             }
 
-            // Reservoir : 4 lignes rebouclees via une matrice de Householder (H = I -
-            // (2/N)*ones(N,N)) - preserve l'energie, stable par construction tant que
-            // chaque gain de ligne reste <1 (garanti par la formule de decroissance).
-            float tankRaw[4], tankFed[4];
-            for (int i = 0; i < 4; ++i)
+            // Tank a 2 bras croises : chaque bras lit sa longue ligne (tap principal,
+            // celui qui reinjecte), l'amortit, applique son gain de decroissance - ces
+            // sorties nourrissent le bras OPPOSE (figure-8) plutot que de se remixer
+            // entre elles via une matrice, ce qui est deja suffisant pour dissoudre la
+            // periodicite avec seulement 2 lignes.
+            float armOut[2], tap2[2];
+            for (int a = 0; a < 2; ++a)
             {
-                tankRaw[i] = fdnTankDelay[i].popSample (ch, fdnTankSamples[i]);
-                fdnTankDampState[i][ch] += (tankRaw[i] - fdnTankDampState[i][ch]) * fdnDampCoeff;
-                tankFed[i] = fdnTankDampState[i][ch] * fdnFeedbackGain[i];
+                const float tankRaw = fdnTankDelay[a].popSample (ch, fdnTankDelaySamples[a]);
+                fdnTankDampState[a][ch] += (tankRaw - fdnTankDampState[a][ch]) * fdnDampCoeff;
+                armOut[a] = fdnTankDampState[a][ch] * fdnTankFeedbackGain[a];
+                tap2[a] = fdnTankDelay[a].popSample (ch, fdnTankTap2Samples[a]);
             }
-            const float tankSum = tankFed[0] + tankFed[1] + tankFed[2] + tankFed[3];
-            for (int i = 0; i < 4; ++i)
-                fdnTankDelay[i].pushSample (ch, tankFed[i] - 0.5f * tankSum + diffused);
 
-            // Tap de sortie pris apres l'amortissement (pas le signal brut de la ligne) :
-            // chaque echo hérite du filtrage au lieu de rester plein-spectre, ce qui
-            // attenue le cote "cloche/metallique" percu sur les premieres reflexions.
-            data[n] = 0.25f * (fdnTankDampState[0][ch] + fdnTankDampState[1][ch]
-                              + fdnTankDampState[2][ch] + fdnTankDampState[3][ch]);
+            // Chaque bras recoit la moitie du signal pre-diffuse + la sortie du bras
+            // oppose, puis retraverse SON PROPRE allpass avant de repartir dans sa
+            // ligne - la diffusion se refait a chaque tour, pas juste a l'entree du tank.
+            for (int a = 0; a < 2; ++a)
+            {
+                const float armIn = 0.5f * diffused + armOut[1 - a];
+                const float wD = fdnTankAllpass[a].popSample (ch, fdnTankApSamples[a]);
+                const float w  = armIn + fdnTankApCoeff * wD;
+                fdnTankAllpass[a].pushSample (ch, w);
+                const float diffusedArm = -fdnTankApCoeff * w + wD;
+                fdnTankDelay[a].pushSample (ch, diffusedArm);
+            }
+
+            data[n] = 0.35f * (armOut[0] + armOut[1]) + 0.15f * (tap2[0] + tap2[1]);
         }
     }
 

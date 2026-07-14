@@ -56,14 +56,17 @@ private:
 
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLine { 192000 };
 
-    // Reseau a retards rebouclés (FDN) maison, remplace juce::dsp::Reverb : 4 allpass de
-    // pre-diffusion en serie -> reservoir de 4 lignes reboucleées via une matrice de
-    // Householder (energie preservee, stable par construction tant que chaque gain de
-    // ligne reste <1 - ce qui est toujours le cas ici, la formule de decroissance ne
-    // produit jamais de gain >=1).
+    // Reseau a retards rebouclés maison, remplace juce::dsp::Reverb. Pre-diffusion :
+    // 4 allpass Schroeder en serie. Tank façon Lexicon/EMT/Dattorro (lignee des refs
+    // hardware du concept) : boucle croisee a 2 bras qui se rebouclent l'un dans
+    // l'autre (figure-8) plutot qu'un simple melange matriciel de lignes independantes -
+    // chaque bras integre son propre allpass DANS la boucle (diffuse a chaque tour, pas
+    // juste a l'entree), ce qui evite le cote "on entend chaque aller-retour" d'un tank
+    // sans diffusion interne. Stable par construction (gain par bras toujours <1).
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> fdnAllpassDelay[4];
-    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> fdnTankDelay[4];
-    float fdnTankDampState[4][2] {};
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> fdnTankAllpass[2];
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> fdnTankDelay[2];
+    float fdnTankDampState[2][2] {};
 
     juce::SmoothedValue<float> reverbSizeSmoothed, reverbCharacterSmoothed, reverbMixSmoothed;
 
