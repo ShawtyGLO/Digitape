@@ -28,6 +28,7 @@ namespace UI
             constexpr Rect driftShapeSlider       {  344.0f,  370.0f,   90.0f,   90.0f };
             constexpr Rect widthSlider            {  570.0f,  346.0f,   90.0f,   90.0f };
             constexpr Rect integritySlider        {  380.0f,  245.0f,   90.0f,   90.0f };
+            constexpr Rect crossFeedbackSlider    {  470.0f,  245.0f,   90.0f,   90.0f };
             constexpr Rect wetGainSlider          {   30.0f,  155.0f,   90.0f,   90.0f };
             constexpr Rect syncAmountSlider       {   30.0f,  266.0f,   90.0f,   90.0f };
             constexpr Rect reverbSizeSlider       {  275.0f,   50.0f,   90.0f,   90.0f };

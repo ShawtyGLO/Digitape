@@ -108,6 +108,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("")));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "crossFeedback", 1 }, "Reinjection croisee",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "feedback", 1 }, "Reinjection",
         juce::NormalisableRange<float> (0.0f, 0.95f, 0.001f), 0.3f,
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
@@ -254,6 +260,9 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     preDelayLine.prepare (spec);
     preDelayLine.reset();
 
+    crossFeedBuffer.setSize (2, samplesPerBlock);
+    crossFeedBuffer.clear();
+
     const double smoothTime = 0.02;
     timeSmoothed.reset (sampleRate, smoothTime);
     feedbackSmoothed.reset (sampleRate, smoothTime);
@@ -275,6 +284,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbHighpassSmoothed.reset (sampleRate, smoothTime);
     reverbLowpassSmoothed.reset (sampleRate, smoothTime);
     reverbBrightnessSmoothed.reset (sampleRate, smoothTime);
+    crossFeedbackSmoothed.reset (sampleRate, smoothTime);
 
     timeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("time"));
     feedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("feedback"));
@@ -296,6 +306,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbHighpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbHighpass"));
     reverbLowpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbLowpass"));
     reverbBrightnessSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbBrightness"));
+    crossFeedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("crossFeedback"));
 
     for (int ch = 0; ch < 2; ++ch)
     {
@@ -385,6 +396,8 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     reverbHighpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbHighpass"));
     reverbLowpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbLowpass"));
     reverbBrightnessSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbBrightness"));
+    crossFeedbackSmoothed.setTargetValue (*apvts.getRawParameterValue ("crossFeedback"));
+    const float crossFeedAmt = crossFeedbackSmoothed.getNextValue();
 
     // Sync tempo : calculee une fois par bloc (le tempo hote ne bouge pas a l'echantillon
     // pres), verrouillage direct sur la division+saveur choisie plutot qu'une recherche
@@ -476,6 +489,13 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
             const float delayedSample = delayLine.popSample (ch, channelDelaySamples[ch]);
             float toPush = inputSample + delayedSample * feedbackAmt;
+
+            // Reinjection croisee : la traine humide de la Reverbe du bloc precedent
+            // revient se faire attraper par le Moteur temps. A zero, chaine propre ;
+            // pousse, generateur ambiant qui s'auto-entretient (delay et reverbe qui se
+            // parlent, facon Roland RE-201). Latence d'un bloc, cf. commentaire du membre.
+            if (crossFeedAmt > 0.0001f && n < crossFeedBuffer.getNumSamples())
+                toPush += crossFeedBuffer.getSample (ch, n) * crossFeedAmt;
 
             // Integrite : dégrade ce qui entre dans la mémoire de la boucle, pas le
             // direct. Chaque passage réinjecte le résultat déjà dégradé, donc les
@@ -609,6 +629,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float lowBand  = tiltLpState[ch];
             const float highBand = wet - lowBand;
             wet = lowBand * lowGain + highBand * highGain;
+
+            // Capture pour la Reinjection croisee du bloc SUIVANT (post-Brightness,
+            // avant le melange avec le direct - c'est la traine elle-meme qui boucle).
+            if (n < crossFeedBuffer.getNumSamples())
+                crossFeedBuffer.setSample (ch, n, wet);
 
             float mixed = dryData[n] * (1.0f - reverbMixVal) + wet * reverbMixVal;
             if (safetyOn)

@@ -72,6 +72,14 @@ private:
     juce::SmoothedValue<float> reverbPreDelaySmoothed, reverbTransientSmoothed,
                                 reverbHighpassSmoothed, reverbLowpassSmoothed, reverbBrightnessSmoothed;
 
+    // Reinjection croisee : la sortie humide de la Reverbe (post-Brightness, avant le
+    // melange Mix) revient dans la boucle du Moteur temps. Le bloc audio precedent n'est
+    // plus accessible une fois la Reverbe traitee, donc on stocke sa traine humide pour
+    // la reinjecter au bloc SUIVANT (latence d'un bloc, standard et inaudible pour ce
+    // genre de bouclage inter-module).
+    juce::AudioBuffer<float> crossFeedBuffer;
+    juce::SmoothedValue<float> crossFeedbackSmoothed;
+
     juce::SmoothedValue<float> timeSmoothed, feedbackSmoothed, mixSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed, integritySmoothed;
 
     // Panneau Advanced (v0 en sliders plats, pas encore de repli visuel) : balance
