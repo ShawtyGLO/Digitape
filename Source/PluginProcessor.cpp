@@ -69,20 +69,23 @@ namespace
     }
 
     // Preampli d'entree : seul etage volontairement analogique de la machine (cf. concept).
-    // Saturation douce facon tube/transfo, appliquee EN ENTREE donc elle colore tout le
-    // signal (sec, echo, reverbe) - a l'inverse de l'Integrite qui epargne le sec. Le drive
-    // monte avec le montant, une legere asymetrie ajoute des harmoniques paires (chaleur
-    // type lampe), et on melange vers le sec par le montant pour un passage sans a-coup a 0.
+    // Saturation douce appliquee EN ENTREE, donc elle colore tout le signal (sec, echo,
+    // reverbe) - a l'inverse de l'Integrite qui epargne le sec.
+    //
+    // UNE SEULE course : le drive monte avec le montant (saturation qui s'installe des le
+    // bas de la course, pas seulement vers 50%), et un makeup AUTOMATIQUE cale un niveau de
+    // reference (~ -10 dBFS) constant en sortie - le volume percu ne monte plus quand on
+    // sature. Pas de melange dry/wet superpose (c'est ce qui donnait la sensation de deux
+    // courses). A montant nul : identite (drive -> 0, makeup -> 1/drive, tanh(x*d)/d -> x).
     inline float preampSaturate (float x, float amount)
     {
         if (amount <= 0.0001f)
             return x;
 
-        const float drive = 1.0f + amount * 5.0f;
-        const float bias  = amount * 0.12f;
-        const float norm  = std::tanh (drive);                 // garde ~l'unite a pleine echelle
-        const float sat = (std::tanh ((x + bias) * drive) - std::tanh (bias * drive)) / norm;
-        return x * (1.0f - amount) + sat * amount;
+        const float drive  = amount * 8.0f;
+        const float ref    = 0.3f;                             // niveau conserve par le makeup
+        const float makeup = ref / std::tanh (ref * drive);
+        return std::tanh (x * drive) * makeup;
     }
 }
 
