@@ -327,6 +327,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
+    // Reactivite interne : un suiveur d'enveloppe sur l'entree pousse l'Integrite selon le
+    // jeu (fort = plus sale, doux = plus propre). Source unique, montant borne.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reactivity", 1 }, "Reactivite",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
     return { params.begin(), params.end() };
 }
 
@@ -461,6 +469,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     integritySmoothed.reset (sampleRate, smoothTime);
     saturationSmoothed.reset (sampleRate, smoothTime);
     saturationEmphasisSmoothed.reset (sampleRate, smoothTime);
+    reactivitySmoothed.reset (sampleRate, smoothTime);
     bitcrushAmountSmoothed.reset (sampleRate, smoothTime);
     decimationAmountSmoothed.reset (sampleRate, smoothTime);
     wetGainSmoothed.reset (sampleRate, smoothTime);
@@ -486,6 +495,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     integritySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("integrity"));
     saturationSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("saturation"));
     saturationEmphasisSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("saturationEmphasis"));
+    reactivitySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reactivity"));
     bitcrushAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
     decimationAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("wetGain"));
@@ -515,6 +525,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     steppedGlideL = 0.0f;
     steppedGlideR = 0.0f;
     widthChorusPhase = 0.0f;
+    reactEnv = 0.0f;
 
     for (int ch = 0; ch < 2; ++ch)
     {
@@ -590,6 +601,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     juce::AudioBuffer<float> globalMixBuf (1, numSamples);
     globalMixBuf.clear();
 
+    // Enveloppe de la Reactivite interne par echantillon (mono), relue dans la passe finale
+    // pour moduler aussi l'Integrite du bus reverbe (pas seulement la boucle echo).
+    juce::AudioBuffer<float> reactEnvBuf (1, numSamples);
+    reactEnvBuf.clear();
+
     // Les sliders ne changent que la valeur cible de l'APVTS : sans ces lignes,
     // les SmoothedValue restent figes sur l'etat du tout premier prepareToPlay
     // et ignorent tout ce que l'utilisateur regle ensuite dans l'interface.
@@ -608,8 +624,14 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     integritySmoothed.setTargetValue (*apvts.getRawParameterValue ("integrity"));
     saturationSmoothed.setTargetValue (*apvts.getRawParameterValue ("saturation"));
     saturationEmphasisSmoothed.setTargetValue (*apvts.getRawParameterValue ("saturationEmphasis"));
+    reactivitySmoothed.setTargetValue (*apvts.getRawParameterValue ("reactivity"));
     bitcrushAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
     const int saturationType = (int) *apvts.getRawParameterValue ("saturationType");
+
+    // Reactivite interne : coeffs du suiveur d'enveloppe (attaque rapide, relache lente pour
+    // suivre la dynamique de jeu).
+    const float reactAttackCoeff  = 1.0f - std::exp (-1.0f / (0.010f * (float) currentSampleRate));
+    const float reactReleaseCoeff = 1.0f - std::exp (-1.0f / (0.200f * (float) currentSampleRate));
     decimationAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setTargetValue (*apvts.getRawParameterValue ("wetGain"));
     syncAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("syncAmount"));
@@ -674,7 +696,17 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float wetGainLin   = wetGainSmoothed.getNextValue();  // Echo volume lineaire, 0 = coupe
         const float saturationAmt = saturationSmoothed.getNextValue();
         const float saturationEmph = saturationEmphasisSmoothed.getNextValue();
+        const float reactivityAmt = reactivitySmoothed.getNextValue();
         const float syncAmt      = syncAmountSmoothed.getNextValue();
+
+        // Reactivite interne : suit l'enveloppe (mono, pic) de l'ENTREE brute et pousse
+        // l'Integrite - jouer fort = plus sale, jouer doux = revient au niveau du bouton.
+        float inLevel = 0.0f;
+        for (int ch = 0; ch < numChannels; ++ch)
+            inLevel = juce::jmax (inLevel, std::abs (buffer.getSample (ch, n)));
+        reactEnv += (inLevel - reactEnv) * (inLevel > reactEnv ? reactAttackCoeff : reactReleaseCoeff);
+        reactEnvBuf.setSample (0, n, reactEnv);
+        const float effectiveIntegrity = juce::jlimit (0.0f, 1.0f, integrityAmt + reactEnv * reactivityAmt);
 
         const float effectiveTimeMs = timeMs * (1.0f - syncAmt) + syncedTimeMs * syncAmt;
 
@@ -750,7 +782,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // répétitions s'assalissent PROGRESSIVEMENT (accumulation) plutôt que d'un
             // coup. Un second étage sur le bus d'effets (cf. passe finale) dégrade en plus
             // la reverbe, pour que l'Intégrité soit un traitement général et pas delay-only.
-            toPush = applyIntegrity (toPush, integrityAmt, bitcrushAmt, decimAmount,
+            toPush = applyIntegrity (toPush, effectiveIntegrity, bitcrushAmt, decimAmount,
                                      holdPhase[ch], heldValue[ch], decimLpState[ch], currentSampleRate);
 
             if (safetyOn)
@@ -956,6 +988,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float integrityBus = *apvts.getRawParameterValue ("integrity");
     const float bitcrushBus  = *apvts.getRawParameterValue ("bitcrushAmount");
     const float decimBus     = *apvts.getRawParameterValue ("decimationAmount");
+    const float reactivityBus = *apvts.getRawParameterValue ("reactivity");
 
     for (int ch = 0; ch < numChannels; ++ch)
     {
@@ -973,7 +1006,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // d'effets : la reverbe est dégradée ici (l'echo l'est déjà dans la boucle),
             // donc l'Intégrité s'entend sur la reverbe et reste active même sans delay.
             float reverbContribution = wet * reverbMixVal;
-            reverbContribution = applyIntegrity (reverbContribution, integrityBus, bitcrushBus, decimBus,
+            // Reactivite : la meme enveloppe d'entree module aussi l'Integrite du bus reverbe.
+            const float effIntegBus = juce::jlimit (0.0f, 1.0f, integrityBus + reactEnvBuf.getSample (0, n) * reactivityBus);
+            reverbContribution = applyIntegrity (reverbContribution, effIntegBus, bitcrushBus, decimBus,
                                                  holdPhaseBus[ch], heldValueBus[ch], decimLpStateBus[ch], currentSampleRate);
 
             // Sert aussi de source a la Reinjection croisee (capturee APRES le niveau reverbe,

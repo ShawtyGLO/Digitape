@@ -134,6 +134,10 @@ private:
     juce::SmoothedValue<float> saturationSmoothed, saturationEmphasisSmoothed;
     PreampState preampState[2];
 
+    // Reactivite interne : suiveur d'enveloppe (mono) sur l'entree, routé vers l'Integrite.
+    juce::SmoothedValue<float> reactivitySmoothed;
+    float reactEnv { 0.0f };
+
     // Panneau Advanced (v0 en sliders plats, pas encore de repli visuel) : balance
     // individuelle entre mecanismes de l'Integrite, la macro pilotant toujours
     // l'intensite globale.

@@ -23,6 +23,7 @@
         { "id": "driftShapeSlider", "label": "Dérive forme", "group": "derive", "x": 344, "y": 370, "w": 90, "h": 90 },
         { "id": "widthSlider", "label": "Largeur", "group": "derive", "x": 570, "y": 346, "w": 90, "h": 90 },
         { "id": "integritySlider", "label": "Intégrité", "group": "integrite", "x": 380, "y": 245, "w": 90, "h": 90 },
+        { "id": "reactivitySlider", "label": "Réactivité", "group": "integrite", "x": 470, "y": 50, "w": 90, "h": 90 },
         { "id": "crossFeedbackSlider", "label": "Reinjection croisee", "group": "reverbe", "x": 470, "y": 245, "w": 90, "h": 90 },
         { "id": "wetGainSlider", "label": "Niv. répét.", "group": "temps", "x": 30, "y": 155, "w": 90, "h": 90 },
         { "id": "syncAmountSlider", "label": "Sync accroche", "group": "temps", "x": 30, "y": 266, "w": 90, "h": 90 },

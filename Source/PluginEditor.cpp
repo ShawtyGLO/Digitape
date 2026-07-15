@@ -20,6 +20,7 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     setupKnob (widthKnob,      "width",      "Largeur");
     setupKnob (driftShapeKnob, "driftShape", "Derive forme");
     setupKnob (integrityKnob,  "integrity",  "Integrite");
+    setupKnob (reactivityKnob, "reactivity", "Reactivite");
     setupKnob (saturationKnob, "saturation", "Saturation");
     setupKnob (wetGainKnob,    "wetGain",    "Echo volume");
     setupKnob (syncAmountKnob, "syncAmount", "Sync accroche");
@@ -103,6 +104,7 @@ void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
     widthKnob.slider.setVisible (!shouldShow);      widthKnob.label.setVisible (!shouldShow);
     driftShapeKnob.slider.setVisible (!shouldShow); driftShapeKnob.label.setVisible (!shouldShow);
     integrityKnob.slider.setVisible (!shouldShow);  integrityKnob.label.setVisible (!shouldShow);
+    reactivityKnob.slider.setVisible (!shouldShow);  reactivityKnob.label.setVisible (!shouldShow);
     saturationKnob.slider.setVisible (!shouldShow);  saturationKnob.label.setVisible (!shouldShow);
     crossFeedbackKnob.slider.setVisible (!shouldShow); crossFeedbackKnob.label.setVisible (!shouldShow);
     outputGainKnob.slider.setVisible (!shouldShow);    outputGainKnob.label.setVisible (!shouldShow);
@@ -151,6 +153,7 @@ void DigitapeAudioProcessorEditor::resized()
     placeKnob (widthKnob,      UI::ctrl::facade::widthSlider.x,      UI::ctrl::facade::widthSlider.y,      UI::ctrl::facade::widthSlider.w,      UI::ctrl::facade::widthSlider.h);
     placeKnob (driftShapeKnob, UI::ctrl::facade::driftShapeSlider.x, UI::ctrl::facade::driftShapeSlider.y, UI::ctrl::facade::driftShapeSlider.w, UI::ctrl::facade::driftShapeSlider.h);
     placeKnob (integrityKnob,  UI::ctrl::facade::integritySlider.x,  UI::ctrl::facade::integritySlider.y,  UI::ctrl::facade::integritySlider.w,  UI::ctrl::facade::integritySlider.h);
+    placeKnob (reactivityKnob, UI::ctrl::facade::reactivitySlider.x, UI::ctrl::facade::reactivitySlider.y, UI::ctrl::facade::reactivitySlider.w, UI::ctrl::facade::reactivitySlider.h);
     placeKnob (saturationKnob, UI::ctrl::facade::saturationSlider.x, UI::ctrl::facade::saturationSlider.y, UI::ctrl::facade::saturationSlider.w, UI::ctrl::facade::saturationSlider.h);
     placeKnob (crossFeedbackKnob, UI::ctrl::facade::crossFeedbackSlider.x, UI::ctrl::facade::crossFeedbackSlider.y, UI::ctrl::facade::crossFeedbackSlider.w, UI::ctrl::facade::crossFeedbackSlider.h);
     placeKnob (outputGainKnob, UI::ctrl::facade::outputGainSlider.x, UI::ctrl::facade::outputGainSlider.y, UI::ctrl::facade::outputGainSlider.w, UI::ctrl::facade::outputGainSlider.h);
