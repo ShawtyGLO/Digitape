@@ -629,9 +629,10 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const int saturationType = (int) *apvts.getRawParameterValue ("saturationType");
 
     // Reactivite interne : coeffs du suiveur d'enveloppe (attaque rapide, relache lente pour
-    // suivre la dynamique de jeu).
+    // suivre la dynamique de jeu) + seuil de declenchement (l'enveloppe doit le depasser).
     const float reactAttackCoeff  = 1.0f - std::exp (-1.0f / (0.010f * (float) currentSampleRate));
     const float reactReleaseCoeff = 1.0f - std::exp (-1.0f / (0.200f * (float) currentSampleRate));
+    constexpr float reactThreshold = 0.18f;   // ~ -15 dBFS ; en dessous, aucune degradation ajoutee
     decimationAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setTargetValue (*apvts.getRawParameterValue ("wetGain"));
     syncAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("syncAmount"));
@@ -706,7 +707,13 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             inLevel = juce::jmax (inLevel, std::abs (buffer.getSample (ch, n)));
         reactEnv += (inLevel - reactEnv) * (inLevel > reactEnv ? reactAttackCoeff : reactReleaseCoeff);
         reactEnvBuf.setSample (0, n, reactEnv);
-        const float effectiveIntegrity = juce::jlimit (0.0f, 1.0f, integrityAmt + reactEnv * reactivityAmt);
+
+        // Réactivité façon "bande digitale qui ne mange que les passages forts" : l'enveloppe
+        // doit dépasser un SEUIL pour dégrader ; en dessous, rien n'est ajouté (parties douces
+        // propres, pas de bruit de fond). Au-dessus, la dégradation croît avec le dépassement.
+        const float reactExcess = juce::jmax (0.0f, reactEnv - reactThreshold);
+        const float reactDrive  = juce::jmin (1.0f, reactExcess / (1.0f - reactThreshold));
+        const float effectiveIntegrity = juce::jlimit (0.0f, 1.0f, integrityAmt + reactDrive * reactivityAmt);
 
         const float effectiveTimeMs = timeMs * (1.0f - syncAmt) + syncedTimeMs * syncAmt;
 
@@ -1006,8 +1013,10 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // d'effets : la reverbe est dégradée ici (l'echo l'est déjà dans la boucle),
             // donc l'Intégrité s'entend sur la reverbe et reste active même sans delay.
             float reverbContribution = wet * reverbMixVal;
-            // Reactivite : la meme enveloppe d'entree module aussi l'Integrite du bus reverbe.
-            const float effIntegBus = juce::jlimit (0.0f, 1.0f, integrityBus + reactEnvBuf.getSample (0, n) * reactivityBus);
+            // Reactivite : meme enveloppe et meme seuil pour le bus reverbe (ne mord que fort).
+            const float envB = reactEnvBuf.getSample (0, n);
+            const float drvB = juce::jmin (1.0f, juce::jmax (0.0f, envB - reactThreshold) / (1.0f - reactThreshold));
+            const float effIntegBus = juce::jlimit (0.0f, 1.0f, integrityBus + drvB * reactivityBus);
             reverbContribution = applyIntegrity (reverbContribution, effIntegBus, bitcrushBus, decimBus,
                                                  holdPhaseBus[ch], heldValueBus[ch], decimLpStateBus[ch], currentSampleRate);
 
