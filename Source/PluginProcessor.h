@@ -108,6 +108,14 @@ private:
     juce::SmoothedValue<float> reverbModulationSmoothed;
     float reverbModPhase { 0.0f };
 
+    // REFLEXIONS PRIMAIRES : ligne a prises multiples, en PARALLELE du tank et nourrie par le
+    // meme signal pre-retarde. C'est le motif des premiers rebonds sur les parois, avant que
+    // les echos ne se melangent en une queue diffuse. Sans elles, on attaquait directement
+    // dans le diffus : or c'est ce motif d'arrivees qui dit a l'oreille la taille de la piece
+    // - d'ou un Taille qui ne convainquait pas, meme une fois qu'il etirait vraiment les lignes.
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> earlyDelayLine { 48000 };
+    juce::SmoothedValue<float> reverbDistanceSmoothed;
+
     // Etages autour du moteur de reverbe (Transient, Input filter, Pre-delai, Brightness) -
     // ne touchent jamais le moteur lui-meme, survivront tels quels au reseau FDN.
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> preDelayLine { 96000 };

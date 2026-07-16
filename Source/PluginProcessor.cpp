@@ -245,6 +245,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f,
         juce::AudioParameterFloatAttributes().withLabel ("")));
 
+    // DISTANCE : equilibre reflexions primaires / queue diffuse. C'est l'indice qui place
+    // l'auditeur dans la piece - beaucoup de primaires = source proche et definie, beaucoup
+    // de queue = source lointaine et noyee. Aucun autre bouton ne couvre cet axe : Taille dit
+    // la dimension, Longueur la duree, Caractere la couleur, mais rien ne disait OU on est.
+    // 0.5 = neutre : c'est la Taille qui decide (grande piece = la queue prend le dessus,
+    // ce qui est physiquement juste). Le bouton decale ce comportement automatique.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverbDistance", 1 }, "Reverbe distance",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
     // Decroissance des graves dans le tank, en MULTIPLE de la Longueur (facon "Bass RT"
     // Lexicon) : l'amortissement du Caractere est un passe-bas, il ne mange que les aigus -
     // rien ne tenait les graves, qui s'empilaient tour apres tour (boueux sur Longueur haute).
@@ -528,6 +540,11 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     preDelayLine.prepare (spec);
     preDelayLine.reset();
 
+    // 0.15 s : la prise la plus tardive (53.7 ms) etiree par la Taille max (1.8x) fait ~97 ms.
+    earlyDelayLine.setMaximumDelayInSamples ((int) (0.15 * sampleRate));
+    earlyDelayLine.prepare (spec);
+    earlyDelayLine.reset();
+
     crossFeedDelayLine.setMaximumDelayInSamples ((int) (0.05 * sampleRate));
     crossFeedDelayLine.prepare (spec);
     crossFeedDelayLine.reset();
@@ -562,6 +579,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbLowpassSmoothed.reset (sampleRate, smoothTime);
     reverbBrightnessSmoothed.reset (sampleRate, smoothTime);
     reverbBassDecaySmoothed.reset (sampleRate, smoothTime);
+    reverbDistanceSmoothed.reset (sampleRate, smoothTime);
     crossFeedbackSmoothed.reset (sampleRate, smoothTime);
     outputGainSmoothed.reset (sampleRate, smoothTime);
 
@@ -594,6 +612,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbLowpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbLowpass"));
     reverbBrightnessSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbBrightness"));
     reverbBassDecaySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbBassDecay"));
+    reverbDistanceSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbDistance"));
     crossFeedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("crossFeedback"));
     outputGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("outputGain"));
 
@@ -1039,6 +1058,41 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     static constexpr float tapFrac1[2][2] = { { 0.31f, 0.67f }, { 0.58f, 0.89f } };
     static constexpr float tapFrac2[2][2] = { { 0.43f, 0.79f }, { 0.71f, 0.37f } };
 
+    // --- Reflexions primaires : motif d'arrivees, etire par la Taille ---
+    // Temps DIFFERENTS par canal : c'est ainsi que la stereo des primaires fonctionne dans une
+    // vraie piece (les rebonds n'atteignent pas les deux oreilles au meme instant), et c'est
+    // bien plus fort comme indice d'espace qu'un simple panoramique. Signes alternes : deux
+    // prises voisines ne se renforcent pas, ca evite au motif de sonner comme un peigne.
+    static constexpr float erTimesMs[2][8] = {
+        { 7.3f, 11.9f, 17.1f, 23.7f, 29.3f, 37.1f, 43.9f, 53.7f },
+        { 9.1f, 13.7f, 19.3f, 21.9f, 31.7f, 34.3f, 47.1f, 51.3f }
+    };
+    static constexpr float erGains[8] = { 1.0f, -0.82f, 0.71f, -0.6f, 0.5f, -0.41f, 0.33f, -0.26f };
+    constexpr float erNorm = 0.565f;   // 1/sqrt(somme des carres) : les prises s'additionnent en energie
+
+    const float reverbDistanceVal = reverbDistanceSmoothed.getNextValue();
+
+    // La Taille fixe l'equilibre de base : plus la piece est grande, plus la queue prend le
+    // dessus sur les primaires - c'est ce qui rend le Taille reellement convaincant, sans
+    // qu'on ait a toucher un bouton. Distance ne fait que DECALER ce comportement automatique.
+    const float sizeTailBias = juce::jmap (reverbSizeVal, 0.0f, 1.0f, 0.35f, 0.65f);
+    const float tailRatio = juce::jlimit (0.05f, 0.95f, sizeTailBias + (reverbDistanceVal - 0.5f) * 0.7f);
+
+    // Fondu a puissance constante : les primaires et la queue sont decorrelees, leurs energies
+    // s'additionnent. Un fondu lineaire creuserait un trou de niveau au milieu de la course.
+    const float erLevel   = std::cos (tailRatio * juce::MathConstants<float>::halfPi);
+    const float tailLevel = std::sin (tailRatio * juce::MathConstants<float>::halfPi);
+
+    float erSamples[2][8];
+    for (int c = 0; c < 2; ++c)
+        for (int i = 0; i < 8; ++i)
+        {
+            // Largeur ecarte les temps d'arrivee du canal droit ; a 0 les deux canaux lisent
+            // le meme motif -> primaires strictement mono, comme le tank.
+            const float t = erTimesMs[0][i] + (erTimesMs[c][i] - erTimesMs[0][i]) * reverbSpread;
+            erSamples[c][i] = juce::jmax (1.0f, t * 0.001f * (float) currentSampleRate * fdnSizeFactor);
+        }
+
     float tapD1[2][2], tapD2[2][2];
     for (int c = 0; c < 2; ++c)
         for (int a = 0; a < 2; ++a)
@@ -1110,6 +1164,19 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         {
             auto* data = buffer.getWritePointer (ch);
             float diffused = data[n];
+            const int tapCh = juce::jmin (ch, 1);
+
+            // Reflexions primaires, en parallele du tank et nourries par le meme signal
+            // pre-retarde. Les 7 premieres prises ne deplacent pas le pointeur de lecture ;
+            // la 8e le fait, et passe EN DERNIER pour que les 8 lisent toutes depuis la meme
+            // position - si elle passait en premier, les 7 autres seraient decalees d'un
+            // echantillon et le motif ne serait plus celui qu'on a dessine.
+            float erOut = 0.0f;
+            for (int i = 1; i < 8; ++i)
+                erOut += earlyDelayLine.popSample (ch, erSamples[tapCh][i], false) * erGains[i];
+            erOut += earlyDelayLine.popSample (ch, erSamples[tapCh][0], true) * erGains[0];
+            erOut *= erNorm;
+            earlyDelayLine.pushSample (ch, data[n]);
 
             // Pre-diffusion : 4 allpass Schroeder en serie, brouille les premieres
             // reflexions sans colorer le spectre (structure allpass = gain unite a
@@ -1132,7 +1199,6 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // sans deplacer le pointeur de lecture (updateReadPointer = false) - ce sont des
             // fenetres sur la ligne, elles ne doivent rien changer a la circulation du tank.
             float tapOut = 0.0f;
-            const int tapCh = juce::jmin (ch, 1);
 
             float raw1[2], fed1[2], raw2[2];
             for (int a = 0; a < 2; ++a)
@@ -1186,7 +1252,10 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // Sortie = les 4 prises (positions propres au canal), et non plus les lectures de
             // la boucle : c'est ce qui porte desormais l'image stereo. Meme makeup (+6 dB) et
             // meme nombre de termes qu'avant, donc le niveau ne bouge pas.
-            data[n] = 0.5f * tapOut;
+            const float tail = 0.5f * tapOut;
+
+            // Primaires + queue, fondu a puissance constante pilote par Taille et Distance.
+            data[n] = erOut * erLevel + tail * tailLevel;
         }
     }
 

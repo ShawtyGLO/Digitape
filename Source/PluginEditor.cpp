@@ -249,6 +249,7 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     setupKnob (reverbTransientKnob,    "reverbTransient",    "Transient");
     setupKnob (reverbBrightnessKnob,   "reverbBrightness",   "Brightness");
     setupKnob (reverbBassDecayKnob,    "reverbBassDecay",    "Graves");
+    setupKnob (reverbDistanceKnob,     "reverbDistance",     "Distance");
     setupKnob (crossFeedbackKnob,      "crossFeedback",      "Croisee");
 
     syncNoteCombo.addItemList ({ "1/32", "1/16", "1/8", "1/4", "1/2", "1/1" }, 1);
@@ -263,7 +264,7 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     for (auto* k : { &driftRateKnob, &driftDepthKnob, &driftShapeKnob, &widthKnob,
                      &bitcrushAmountKnob, &decimationAmountKnob, &saturationEmphasisKnob,
                      &reverbPreDelayKnob, &reverbTransientKnob, &reverbBrightnessKnob,
-                     &reverbBassDecayKnob, &crossFeedbackKnob })
+                     &reverbBassDecayKnob, &reverbDistanceKnob, &crossFeedbackKnob })
         k->label.setColour (juce::Label::textColourId, Skin::silk);
 
     addAndMakeVisible (advancedToggle);
@@ -305,7 +306,7 @@ void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
     for (auto* k : { &driftRateKnob, &driftDepthKnob, &driftShapeKnob, &widthKnob,
                      &bitcrushAmountKnob, &decimationAmountKnob, &saturationEmphasisKnob,
                      &reverbPreDelayKnob, &reverbTransientKnob, &reverbBrightnessKnob,
-                     &reverbBassDecayKnob, &crossFeedbackKnob })
+                     &reverbBassDecayKnob, &reverbDistanceKnob, &crossFeedbackKnob })
     {
         k->slider.setVisible (shouldShow);
         k->label.setVisible (shouldShow);
@@ -395,9 +396,9 @@ void DigitapeAudioProcessorEditor::resized()
     if (showingAdvanced)
     {
         auto hood = hoodArea.reduced (16, 0).withTrimmedTop (26).withTrimmedBottom (12);
-        // 7 colonnes depuis l'ajout de Graves : la rangee 2 (preampli + reverbe + reinjection)
-        // en compte exactement 7 ; la rangee 1 en garde 6 et laisse une cellule libre a droite.
-        const int cellW = hood.getWidth() / 7;
+        // 8 colonnes : la rangee 2 (preampli + reverbe + reinjection) en compte exactement 8 ;
+        // la rangee 1 en garde 6 et laisse deux cellules libres a droite.
+        const int cellW = hood.getWidth() / 8;
 
         auto row1 = hood.removeFromTop (74);
         placeKnob (driftRateKnob,        row1.removeFromLeft (cellW).reduced (6, 0));
@@ -414,6 +415,7 @@ void DigitapeAudioProcessorEditor::resized()
         placeKnob (reverbTransientKnob,    row2.removeFromLeft (cellW).reduced (6, 0));
         placeKnob (reverbBrightnessKnob,   row2.removeFromLeft (cellW).reduced (6, 0));
         placeKnob (reverbBassDecayKnob,    row2.removeFromLeft (cellW).reduced (6, 0));
+        placeKnob (reverbDistanceKnob,     row2.removeFromLeft (cellW).reduced (6, 0));
         placeKnob (crossFeedbackKnob,      row2.removeFromLeft (cellW).reduced (6, 0));
 
         auto combos = row2.removeFromLeft (cellW).reduced (6, 8);
