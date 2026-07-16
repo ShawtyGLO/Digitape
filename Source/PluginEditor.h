@@ -126,7 +126,7 @@ private:
     KnobWithLabel driftRateKnob, driftDepthKnob, driftShapeKnob, widthKnob;    // Derive
     KnobWithLabel bitcrushAmountKnob, decimationAmountKnob;                    // Integrite
     KnobWithLabel saturationEmphasisKnob;                                      // Preampli
-    KnobWithLabel reverbPreDelayKnob, reverbTransientKnob, reverbBrightnessKnob; // Reverbe
+    KnobWithLabel reverbPreDelayKnob, reverbTransientKnob, reverbBrightnessKnob, reverbBassDecayKnob; // Reverbe
     KnobWithLabel crossFeedbackKnob;
     juce::ComboBox syncNoteCombo, syncFlavorCombo;
     std::unique_ptr<ComboBoxAttachment> syncNoteAttachment, syncFlavorAttachment;

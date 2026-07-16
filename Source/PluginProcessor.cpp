@@ -245,6 +245,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f,
         juce::AudioParameterFloatAttributes().withLabel ("")));
 
+    // Decroissance des graves dans le tank, en MULTIPLE de la Longueur (facon "Bass RT"
+    // Lexicon) : l'amortissement du Caractere est un passe-bas, il ne mange que les aigus -
+    // rien ne tenait les graves, qui s'empilaient tour apres tour (boueux sur Longueur haute).
+    // Neutre a 1.0 = comportement d'avant, on ne change pas le son par surprise ; sous 1 les
+    // graves meurent plus vite que les mediums (le reglage qui degage une voix), au-dessus ils
+    // tiennent plus longtemps (grandes salles). Skew pour poser le neutre au centre de course.
+    auto bassDecayRange = juce::NormalisableRange<float> (0.25f, 2.0f, 0.01f);
+    bassDecayRange.setSkewForCentre (1.0f);
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverbBassDecay", 1 }, "Reverbe graves",
+        bassDecayRange, 1.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("x").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (v, 2) + "x"; })));
+
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "crossFeedback", 1 }, "Reinjection croisee",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,
@@ -495,6 +509,9 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     for (auto& row : fdnTankDampState)
         for (auto& v : row)
             v = 0.0f;
+    for (auto& row : fdnTankBassState)
+        for (auto& v : row)
+            v = 0.0f;
 
     // Filtres 2 poles : boucle du delay + entree de la reverbe.
     delayHpFilter.setType (juce::dsp::StateVariableTPTFilterType::highpass);
@@ -544,6 +561,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbHighpassSmoothed.reset (sampleRate, smoothTime);
     reverbLowpassSmoothed.reset (sampleRate, smoothTime);
     reverbBrightnessSmoothed.reset (sampleRate, smoothTime);
+    reverbBassDecaySmoothed.reset (sampleRate, smoothTime);
     crossFeedbackSmoothed.reset (sampleRate, smoothTime);
     outputGainSmoothed.reset (sampleRate, smoothTime);
 
@@ -575,6 +593,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbHighpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbHighpass"));
     reverbLowpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbLowpass"));
     reverbBrightnessSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbBrightness"));
+    reverbBassDecaySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbBassDecay"));
     crossFeedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("crossFeedback"));
     outputGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("outputGain"));
 
@@ -978,7 +997,14 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // Toutes les longueurs du tank suivent la Taille. Le gain de reinjection est recalcule
     // sur le tour REEL (donc etire lui aussi) : la Longueur reste tenue quelle que soit la
     // Taille - agrandir la piece ne raccourcit pas la queue.
-    float fdnTankAp1Samples[2], fdnTankDelay1Samples[2], fdnTankAp2Samples[2], fdnTankDelay2Samples[2], fdnTankFeedbackGain[2];
+    // Graves du tank : le passe-bas de separation est fixe a 350 Hz (frontiere classique
+    // grave/medium des reverbes a "Bass RT"), volontairement pas expose - la facade a deja
+    // trop de boutons pour en ajouter un dont personne ne bouge la valeur.
+    const float reverbBassMult = reverbBassDecaySmoothed.getNextValue();
+    const float fdnBassCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * 350.0f / (float) currentSampleRate);
+
+    float fdnTankAp1Samples[2], fdnTankDelay1Samples[2], fdnTankAp2Samples[2], fdnTankDelay2Samples[2],
+          fdnTankFeedbackGain[2], fdnTankBassGain[2];
     for (int a = 0; a < 2; ++a)
     {
         const float ap1Ms = fdnTankAp1TimesMs[a]    * fdnSizeFactor;
@@ -993,6 +1019,12 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
         const float roundTripSeconds = (ap1Ms + d1Ms + ap2Ms + d2Ms) * 0.001f;
         fdnTankFeedbackGain[a] = std::pow (10.0f, -3.0f * roundTripSeconds / fdnDecaySeconds);
+
+        // Gain propre a la bande grave. Le plafond a 0.995 n'est pas cosmetique : a Longueur
+        // 12 s le gain nominal vaut deja ~0.85, un multiplicateur de 2 le porterait a 1.7 et
+        // la bande grave partirait en emballement au lieu de decroitre. On borne donc juste
+        // sous 1 - le grave peut tenir tres longtemps, jamais grossir.
+        fdnTankBassGain[a] = juce::jmin (0.995f, fdnTankFeedbackGain[a] * reverbBassMult);
     }
 
 
@@ -1086,7 +1118,16 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 // la desaccorder legerement est ce qui tue le metallique.
                 raw1[a] = fdnTankDelay1[a].popSample (ch, juce::jmax (1.0f, fdnTankDelay1Samples[a] * chScale + modOff[a]));
                 fdnTankDampState[a][ch] += (raw1[a] - fdnTankDampState[a][ch]) * fdnDampCoeff;
-                fed1[a] = fdnTankDampState[a][ch] * fdnTankFeedbackGain[a];
+                const float damped = fdnTankDampState[a][ch];
+
+                // Les graves prennent leur propre gain de reinjection : on separe la bande
+                // basse du reste et on donne a chacune son taux de decroissance. Comme c'est
+                // applique a chaque tour, l'ecart se creuse tout au long de la queue - c'est
+                // exactement le comportement recherche (les graves s'effacent pendant que les
+                // mediums tiennent, ou l'inverse). A 1.0x les deux gains sont egaux : neutre.
+                fdnTankBassState[a][ch] += (damped - fdnTankBassState[a][ch]) * fdnBassCoeff;
+                const float bass = fdnTankBassState[a][ch];
+                fed1[a] = bass * fdnTankBassGain[a] + (damped - bass) * fdnTankFeedbackGain[a];
 
                 raw2[a] = fdnTankDelay2[a].popSample (ch, juce::jmax (1.0f, fdnTankDelay2Samples[a] * chScale));
             }

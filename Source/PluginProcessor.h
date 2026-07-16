@@ -94,6 +94,12 @@ private:
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> fdnTankDelay2[2];
     float fdnTankDampState[2][2] {};
 
+    // Separation grave/medium dans la boucle du tank : un passe-bas fixe (~350 Hz) par bras,
+    // dont la sortie recoit son PROPRE gain de reinjection -> les graves peuvent decroitre
+    // plus vite (ou plus lentement) que le reste. Etat separe de l'amortissement.
+    float fdnTankBassState[2][2] {};
+    juce::SmoothedValue<float> reverbBassDecaySmoothed;
+
     juce::SmoothedValue<float> reverbSizeSmoothed, reverbDecaySmoothed, reverbCharacterSmoothed, reverbMixSmoothed;
 
     // Modulation du tank : un LFO lent unique, 4 prises decalees en phase, qui module
