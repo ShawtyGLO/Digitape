@@ -107,9 +107,10 @@ private:
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> preDelayLine { 96000 };
     float transientFastEnv[2] { 0.0f, 0.0f };
     float transientSlowEnv[2] { 0.0f, 0.0f };
-    float reverbHpState[2]    { 0.0f, 0.0f };
-    float reverbLpState[2]    { 0.0f, 0.0f };
     float tiltLpState[2]      { 0.0f, 0.0f };
+
+    // Filtre d'entree de la reverbe : 2 poles (12 dB/oct), meme raison que celui du delay.
+    juce::dsp::StateVariableTPTFilter<float> reverbHpFilter, reverbLpFilter;
 
     juce::SmoothedValue<float> reverbPreDelaySmoothed, reverbTransientSmoothed,
                                 reverbHighpassSmoothed, reverbLowpassSmoothed, reverbBrightnessSmoothed;
@@ -144,12 +145,13 @@ private:
     juce::SmoothedValue<float> reactivitySmoothed;
     float reactEnv { 0.0f };
 
-    // Filtre DANS LA BOUCLE du delay : etat par canal. Chaque passage refiltre, donc les
-    // repetitions s'assombrissent progressivement (comme une bande qui perd des aigus a
-    // chaque tour) au lieu de revenir a pleine bande et de s'empiler.
+    // Filtre DANS LA BOUCLE du delay. Chaque passage refiltre, donc les repetitions
+    // s'assombrissent progressivement (comme une bande qui perd des aigus a chaque tour)
+    // au lieu de revenir a pleine bande et de s'empiler.
+    // Vrais 2 poles (12 dB/oct) : les cellules a un pole (6 dB/oct) filtraient trop peu
+    // pour faire un filtre precis - genou trop mou, on n'entendait presque rien bouger.
     juce::SmoothedValue<float> delayHighpassSmoothed, delayLowpassSmoothed;
-    float delayHpState[2] { 0.0f, 0.0f };
-    float delayLpState[2] { 0.0f, 0.0f };
+    juce::dsp::StateVariableTPTFilter<float> delayHpFilter, delayLpFilter;
 
     // Panneau Advanced (v0 en sliders plats, pas encore de repli visuel) : balance
     // individuelle entre mecanismes de l'Integrite, la macro pilotant toujours

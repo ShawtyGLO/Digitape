@@ -80,13 +80,23 @@ FilterRangeSlider::FilterRangeSlider (juce::AudioProcessorValueTreeState& state,
     jassert (hpParam != nullptr && lpParam != nullptr);
 
     hpAttach = std::make_unique<juce::ParameterAttachment> (*hpParam,
-        [this] (float v) { hpNorm = hpParam->convertTo0to1 (v); repaint(); });
+        [this] (float v) { hpHz = v; repaint(); });
     lpAttach = std::make_unique<juce::ParameterAttachment> (*lpParam,
-        [this] (float v) { lpNorm = lpParam->convertTo0to1 (v); repaint(); });
+        [this] (float v) { lpHz = v; repaint(); });
 
     hpAttach->sendInitialUpdate();
     lpAttach->sendInitialUpdate();
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
+}
+
+float FilterRangeSlider::axisPos (float hz)
+{
+    return std::log (juce::jlimit (axisLo, axisHi, hz) / axisLo) / std::log (axisHi / axisLo);
+}
+
+float FilterRangeSlider::axisHz (float pos)
+{
+    return axisLo * std::pow (axisHi / axisLo, juce::jlimit (0.0f, 1.0f, pos));
 }
 
 juce::Rectangle<float> FilterRangeSlider::trackBounds() const
@@ -96,27 +106,27 @@ juce::Rectangle<float> FilterRangeSlider::trackBounds() const
                            .withSizeKeepingCentre ((float) getWidth() - 18.0f, 8.0f);
 }
 
-float FilterRangeSlider::xForNorm (float norm) const
+float FilterRangeSlider::xForHz (float hz) const
 {
     const auto t = trackBounds();
-    return t.getX() + norm * t.getWidth();
+    return t.getX() + axisPos (hz) * t.getWidth();
 }
 
-float FilterRangeSlider::normForX (float x) const
+float FilterRangeSlider::hzForX (float x) const
 {
     const auto t = trackBounds();
-    return juce::jlimit (0.0f, 1.0f, (x - t.getX()) / juce::jmax (1.0f, t.getWidth()));
+    return axisHz ((x - t.getX()) / juce::jmax (1.0f, t.getWidth()));
 }
 
 int FilterRangeSlider::nearestHandle (float x) const
 {
-    return std::abs (x - xForNorm (hpNorm)) <= std::abs (x - xForNorm (lpNorm)) ? 0 : 1;
+    return std::abs (x - xForHz (hpHz)) <= std::abs (x - xForHz (lpHz)) ? 0 : 1;
 }
 
 void FilterRangeSlider::paint (juce::Graphics& g)
 {
     const auto t = trackBounds();
-    const auto hpX = xForNorm (hpNorm), lpX = xForNorm (lpNorm);
+    const auto hpX = xForHz (hpHz), lpX = xForHz (lpHz);
 
     // Piste + bande passante (ce qui passe entre HP et LP).
     g.setColour (Skin::ink.withAlpha (0.22f));
@@ -146,8 +156,8 @@ void FilterRangeSlider::paint (juce::Graphics& g)
     auto footer = getLocalBounds().removeFromBottom (13);
     g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
     g.setColour (Skin::inkDim);
-    g.drawText (asHz (hpParam->convertFrom0to1 (hpNorm)), footer.removeFromLeft (50), juce::Justification::centredLeft, false);
-    g.drawText (asHz (lpParam->convertFrom0to1 (lpNorm)), footer.removeFromRight (50), juce::Justification::centredRight, false);
+    g.drawText (asHz (hpHz), footer.removeFromLeft (50), juce::Justification::centredLeft, false);
+    g.drawText (asHz (lpHz), footer.removeFromRight (50), juce::Justification::centredRight, false);
     g.setColour (Skin::ink);
     g.drawText (title, footer, juce::Justification::centred, false);
 }
@@ -164,10 +174,19 @@ void FilterRangeSlider::mouseDrag (const juce::MouseEvent& e)
     if (dragging < 0)
         return;
 
-    const auto norm = normForX ((float) e.x);
+    // Les poignees ne peuvent pas se croiser : on borne chacune par sa propre plage ET par
+    // l'autre poignee, en gardant un ecart minimal (sinon HP > LP = bande inversee).
+    constexpr float minRatio = 1.15f;
+    auto  hz = hzForX ((float) e.x);
     auto* p  = (dragging == 0 ? hpParam : lpParam);
-    auto& at = (dragging == 0 ? hpAttach : lpAttach);
-    at->setValueAsPartOfGesture (p->convertFrom0to1 (norm));
+    const auto range = p->getNormalisableRange();
+
+    if (dragging == 0)
+        hz = juce::jlimit (range.start, juce::jmin (range.end, lpHz / minRatio), hz);
+    else
+        hz = juce::jlimit (juce::jmax (range.start, hpHz * minRatio), range.end, hz);
+
+    (dragging == 0 ? hpAttach : lpAttach)->setValueAsPartOfGesture (hz);
 }
 
 void FilterRangeSlider::mouseUp (const juce::MouseEvent&)

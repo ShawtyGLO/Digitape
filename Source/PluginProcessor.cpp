@@ -476,6 +476,17 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         for (auto& v : row)
             v = 0.0f;
 
+    // Filtres 2 poles : boucle du delay + entree de la reverbe.
+    delayHpFilter.setType (juce::dsp::StateVariableTPTFilterType::highpass);
+    delayLpFilter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
+    reverbHpFilter.setType (juce::dsp::StateVariableTPTFilterType::highpass);
+    reverbLpFilter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
+    for (auto* f : { &delayHpFilter, &delayLpFilter, &reverbHpFilter, &reverbLpFilter })
+    {
+        f->prepare (spec);
+        f->reset();
+    }
+
     preDelayLine.setMaximumDelayInSamples ((int) (0.2 * sampleRate));
     preDelayLine.prepare (spec);
     preDelayLine.reset();
@@ -547,8 +558,6 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     {
         transientFastEnv[ch] = 0.0f;
         transientSlowEnv[ch] = 0.0f;
-        reverbHpState[ch] = 0.0f;
-        reverbLpState[ch] = 0.0f;
         tiltLpState[ch] = 0.0f;
         crossFeedCompEnv[ch] = 0.0f;
     }
@@ -565,8 +574,6 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         holdPhase[ch] = 0.0f;
         heldValue[ch] = 0.0f;
         decimLpState[ch] = 0.0f;
-        delayHpState[ch] = 0.0f;
-        delayLpState[ch] = 0.0f;
         holdPhaseBus[ch] = 0.0f;
         heldValueBus[ch] = 0.0f;
         decimLpStateBus[ch] = 0.0f;
@@ -665,10 +672,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     bitcrushAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
     const int saturationType = (int) *apvts.getRawParameterValue ("saturationType");
 
-    // Filtre de boucle du delay : coeffs calcules une fois par bloc (meme approche que les
-    // filtres de la reverbe). Applique a chaque tour de boucle -> assombrissement progressif.
-    const float delayHpCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * delayHighpassSmoothed.getNextValue() / (float) currentSampleRate);
-    const float delayLpCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * delayLowpassSmoothed.getNextValue() / (float) currentSampleRate);
+    // Filtre de boucle du delay : cutoffs poses une fois par bloc, filtres 2 poles.
+    delayHpFilter.setCutoffFrequency (delayHighpassSmoothed.getNextValue());
+    delayLpFilter.setCutoffFrequency (delayLowpassSmoothed.getNextValue());
 
     // Reactivite interne : coeffs du suiveur d'enveloppe (attaque rapide, relache lente pour
     // suivre la dynamique de jeu) + seuil de declenchement (l'enveloppe doit le depasser).
@@ -831,10 +837,8 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // s'assombrissent progressivement (une bande perd des aigus a chaque tour).
             // Sans lui, les echos revenaient a pleine bande et s'empilaient - le defaut qui
             // rendait le delay dur sur une voix. Ouvert par defaut = neutre.
-            delayHpState[ch] += (toPush - delayHpState[ch]) * delayHpCoeff;
-            toPush = toPush - delayHpState[ch];
-            delayLpState[ch] += (toPush - delayLpState[ch]) * delayLpCoeff;
-            toPush = delayLpState[ch];
+            toPush = delayHpFilter.processSample (ch, toPush);
+            toPush = delayLpFilter.processSample (ch, toPush);
 
             // Integrite dans la boucle : dégrade ce qui entre dans la mémoire du delay,
             // pas le direct. Chaque passage réinjecte le résultat déjà dégradé, donc les
@@ -933,8 +937,8 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // Pre-delai. Tous independants du moteur, ne bougeront pas au remplacement par le FDN.
     const float transientFastCoeff = 1.0f - std::exp (-1.0f / (0.003f * (float) currentSampleRate));
     const float transientSlowCoeff = 1.0f - std::exp (-1.0f / (0.08f  * (float) currentSampleRate));
-    const float hpCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * highpassHz / (float) currentSampleRate);
-    const float lpCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * lowpassHz  / (float) currentSampleRate);
+    reverbHpFilter.setCutoffFrequency (highpassHz);
+    reverbLpFilter.setCutoffFrequency (lowpassHz);
     const float preDelaySamples = preDelayMs * 0.001f * (float) currentSampleRate;
 
     // Compresseur local de la Reinjection croisee (Option C, reglages internes, pas de
@@ -965,11 +969,8 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float duck = juce::jlimit (0.0f, 1.0f, transientAmt * spike * 6.0f);
             x *= (1.0f - duck);
 
-            reverbHpState[ch] += (x - reverbHpState[ch]) * hpCoeff;
-            x = x - reverbHpState[ch];
-
-            reverbLpState[ch] += (x - reverbLpState[ch]) * lpCoeff;
-            x = reverbLpState[ch];
+            x = reverbHpFilter.processSample (ch, x);
+            x = reverbLpFilter.processSample (ch, x);
 
             const float preDelayed = preDelayLine.popSample (ch, preDelaySamples);
             preDelayLine.pushSample (ch, x);

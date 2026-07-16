@@ -54,15 +54,23 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
 
 private:
+    // Les deux parametres ont des plages DIFFERENTES (HP 20-2k, LP 500-20k). Les poser
+    // chacun sur sa propre normalisation 0-1 de la meme barre serait faux : leurs positions
+    // ne correspondraient pas aux memes frequences. On les place donc sur un AXE LOG COMMUN
+    // 20 Hz -> 20 kHz, ce qui rend la bande passante affichee reelle et le non-croisement naturel.
+    static constexpr float axisLo = 20.0f, axisHi = 20000.0f;
+    static float axisPos (float hz);
+    static float axisHz  (float pos);
+
     juce::Rectangle<float> trackBounds() const;
-    float xForNorm (float norm) const;
-    float normForX (float x) const;
+    float xForHz (float hz) const;
+    float hzForX (float x) const;
     int   nearestHandle (float x) const;
 
     juce::RangedAudioParameter* hpParam { nullptr };
     juce::RangedAudioParameter* lpParam { nullptr };
     std::unique_ptr<juce::ParameterAttachment> hpAttach, lpAttach;
-    float hpNorm { 0.0f }, lpNorm { 1.0f };
+    float hpHz { 20.0f }, lpHz { 20000.0f };
     int dragging { -1 };            // -1 = aucun, 0 = HP, 1 = LP
     juce::String title;
 
