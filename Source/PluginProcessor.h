@@ -138,6 +138,13 @@ private:
     juce::SmoothedValue<float> reactivitySmoothed;
     float reactEnv { 0.0f };
 
+    // Filtre DANS LA BOUCLE du delay : etat par canal. Chaque passage refiltre, donc les
+    // repetitions s'assombrissent progressivement (comme une bande qui perd des aigus a
+    // chaque tour) au lieu de revenir a pleine bande et de s'empiler.
+    juce::SmoothedValue<float> delayHighpassSmoothed, delayLowpassSmoothed;
+    float delayHpState[2] { 0.0f, 0.0f };
+    float delayLpState[2] { 0.0f, 0.0f };
+
     // Panneau Advanced (v0 en sliders plats, pas encore de repli visuel) : balance
     // individuelle entre mecanismes de l'Integrite, la macro pilotant toujours
     // l'intensite globale.

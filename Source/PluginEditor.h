@@ -44,6 +44,7 @@ private:
     KnobWithLabel bitcrushAmountKnob, decimationAmountKnob;
     KnobWithLabel reverbPreDelayKnob, reverbTransientKnob, reverbHighpassKnob, reverbLowpassKnob, reverbBrightnessKnob;
     KnobWithLabel saturationEmphasisKnob;
+    KnobWithLabel delayHighpassKnob, delayLowpassKnob;
     juce::ComboBox syncNoteCombo, syncFlavorCombo, saturationTypeCombo;
     std::unique_ptr<ComboBoxAttachment> syncNoteAttachment, syncFlavorAttachment, saturationTypeAttachment;
 

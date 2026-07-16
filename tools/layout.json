@@ -39,7 +39,7 @@
     },
     "advanced": {
       "label": "Advanced (panneau déplié)",
-      "height": 280,
+      "height": 380,
       "zones": [],
       "controls": [
         { "id": "bitcrushAmountSlider", "label": "Bitcrush", "group": "integrite", "x": 40, "y": 50, "w": 90, "h": 90 },
@@ -50,7 +50,9 @@
         { "id": "reverbLowpassSlider", "label": "Reverbe LP", "group": "reverbe", "x": 430, "y": 150, "w": 90, "h": 90 },
         { "id": "reverbBrightnessSlider", "label": "Reverbe brightness", "group": "reverbe", "x": 560, "y": 150, "w": 90, "h": 90 },
         { "id": "saturationEmphasisSlider", "label": "Sat emphasis", "group": "preamp", "x": 300, "y": 50, "w": 90, "h": 90 },
-        { "id": "saturationTypeCombo", "label": "Sat type", "group": "preamp", "x": 430, "y": 60, "w": 140, "h": 28 }
+        { "id": "saturationTypeCombo", "label": "Sat type", "group": "preamp", "x": 430, "y": 60, "w": 140, "h": 28 },
+        { "id": "delayHighpassSlider", "label": "Delay HP", "group": "temps", "x": 40, "y": 250, "w": 90, "h": 90 },
+        { "id": "delayLowpassSlider", "label": "Delay LP", "group": "temps", "x": 170, "y": 250, "w": 90, "h": 90 }
       ]
     }
   },

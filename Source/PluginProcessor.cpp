@@ -335,6 +335,19 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
+    // Filtre DANS LA BOUCLE du delay : chaque repetition le retraverse, donc les echos
+    // s'assombrissent progressivement (comportement d'une bande). Sans lui, les repetitions
+    // reviennent a pleine bande et s'empilent - dur sur une voix. Ouverts par defaut (neutre).
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "delayHighpass", 1 }, "Delay HP",
+        juce::NormalisableRange<float> (20.0f, 2000.0f, 0.01f, 0.3f), 20.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("Hz")));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "delayLowpass", 1 }, "Delay LP",
+        juce::NormalisableRange<float> (500.0f, 20000.0f, 0.01f, 0.3f), 20000.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("Hz")));
+
     return { params.begin(), params.end() };
 }
 
@@ -470,6 +483,8 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     saturationSmoothed.reset (sampleRate, smoothTime);
     saturationEmphasisSmoothed.reset (sampleRate, smoothTime);
     reactivitySmoothed.reset (sampleRate, smoothTime);
+    delayHighpassSmoothed.reset (sampleRate, smoothTime);
+    delayLowpassSmoothed.reset (sampleRate, smoothTime);
     bitcrushAmountSmoothed.reset (sampleRate, smoothTime);
     decimationAmountSmoothed.reset (sampleRate, smoothTime);
     wetGainSmoothed.reset (sampleRate, smoothTime);
@@ -496,6 +511,8 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     saturationSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("saturation"));
     saturationEmphasisSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("saturationEmphasis"));
     reactivitySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reactivity"));
+    delayHighpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("delayHighpass"));
+    delayLowpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("delayLowpass"));
     bitcrushAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
     decimationAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("wetGain"));
@@ -532,6 +549,8 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         holdPhase[ch] = 0.0f;
         heldValue[ch] = 0.0f;
         decimLpState[ch] = 0.0f;
+        delayHpState[ch] = 0.0f;
+        delayLpState[ch] = 0.0f;
         holdPhaseBus[ch] = 0.0f;
         heldValueBus[ch] = 0.0f;
         decimLpStateBus[ch] = 0.0f;
@@ -625,8 +644,15 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     saturationSmoothed.setTargetValue (*apvts.getRawParameterValue ("saturation"));
     saturationEmphasisSmoothed.setTargetValue (*apvts.getRawParameterValue ("saturationEmphasis"));
     reactivitySmoothed.setTargetValue (*apvts.getRawParameterValue ("reactivity"));
+    delayHighpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("delayHighpass"));
+    delayLowpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("delayLowpass"));
     bitcrushAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
     const int saturationType = (int) *apvts.getRawParameterValue ("saturationType");
+
+    // Filtre de boucle du delay : coeffs calcules une fois par bloc (meme approche que les
+    // filtres de la reverbe). Applique a chaque tour de boucle -> assombrissement progressif.
+    const float delayHpCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * delayHighpassSmoothed.getNextValue() / (float) currentSampleRate);
+    const float delayLpCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * delayLowpassSmoothed.getNextValue() / (float) currentSampleRate);
 
     // Reactivite interne : coeffs du suiveur d'enveloppe (attaque rapide, relache lente pour
     // suivre la dynamique de jeu) + seuil de declenchement (l'enveloppe doit le depasser).
@@ -783,6 +809,15 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // temps. A zero, chaine propre ; pousse, generateur ambiant qui s'auto-
             // entretient (delay et reverbe qui se parlent, facon Roland RE-201).
             toPush += crossFeedDelayLine.popSample (ch, crossFeedDelaySamples) * crossFeedAmt;
+
+            // Filtre DANS la boucle : applique a CHAQUE passage, donc les repetitions
+            // s'assombrissent progressivement (une bande perd des aigus a chaque tour).
+            // Sans lui, les echos revenaient a pleine bande et s'empilaient - le defaut qui
+            // rendait le delay dur sur une voix. Ouvert par defaut = neutre.
+            delayHpState[ch] += (toPush - delayHpState[ch]) * delayHpCoeff;
+            toPush = toPush - delayHpState[ch];
+            delayLpState[ch] += (toPush - delayLpState[ch]) * delayLpCoeff;
+            toPush = delayLpState[ch];
 
             // Integrite dans la boucle : dégrade ce qui entre dans la mémoire du delay,
             // pas le direct. Chaque passage réinjecte le résultat déjà dégradé, donc les
