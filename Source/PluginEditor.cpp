@@ -19,16 +19,22 @@ DigitapeLookAndFeel::DigitapeLookAndFeel()
     setColour (juce::ToggleButton::tickColourId,     Skin::rust);
     setColour (juce::ToggleButton::tickDisabledColourId, Skin::ink.withAlpha (0.35f));
     setColour (juce::TextButton::buttonColourId,     Skin::panelLo);
+    setColour (juce::TextButton::buttonOnColourId,   Skin::rust);
     setColour (juce::TextButton::textColourOffId,    Skin::ink);
-    setColour (juce::TextButton::textColourOnId,     Skin::ink);
+    setColour (juce::TextButton::textColourOnId,     Skin::panelHi);
 }
 
 void DigitapeLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
                                             float sliderPos, float rotaryStartAngle, float rotaryEndAngle,
                                             juce::Slider&)
 {
-    auto bounds = juce::Rectangle<int> (x, y, width, height).toFloat().reduced (3.0f);
-    const auto radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
+    // Un knob se dessine dans un CARRE centre : sinon l'ellipse s'etire des que la cellule
+    // n'est pas carree (c'etait le cas, d'ou les knobs deformes en soucoupe).
+    const auto area = juce::Rectangle<int> (x, y, width, height).toFloat().reduced (3.0f);
+    const auto side = juce::jmin (area.getWidth(), area.getHeight());
+    const auto bounds = juce::Rectangle<float> (side, side).withCentre (area.getCentre());
+
+    const auto radius = side * 0.5f;
     const auto centre = bounds.getCentre();
     const auto angle  = rotaryStartAngle + sliderPos * (rotaryEndAngle - rotaryStartAngle);
 
@@ -130,12 +136,18 @@ void FilterRangeSlider::paint (juce::Graphics& g)
         g.drawEllipse (h, 1.2f);
     }
 
-    // Titre + valeurs.
+    // Titre + valeurs, en Hz lisibles (pas "20000.00").
+    auto asHz = [] (float hz)
+    {
+        return hz >= 1000.0f ? juce::String (hz / 1000.0f, 1) + " k"
+                             : juce::String (juce::roundToInt (hz)) + " Hz";
+    };
+
     auto footer = getLocalBounds().removeFromBottom (13);
     g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
     g.setColour (Skin::inkDim);
-    g.drawText (hpParam->getCurrentValueAsText(), footer.removeFromLeft (52), juce::Justification::centredLeft, false);
-    g.drawText (lpParam->getCurrentValueAsText(), footer.removeFromRight (52), juce::Justification::centredRight, false);
+    g.drawText (asHz (hpParam->convertFrom0to1 (hpNorm)), footer.removeFromLeft (50), juce::Justification::centredLeft, false);
+    g.drawText (asHz (lpParam->convertFrom0to1 (lpNorm)), footer.removeFromRight (50), juce::Justification::centredRight, false);
     g.setColour (Skin::ink);
     g.drawText (title, footer, juce::Justification::centred, false);
 }
@@ -224,6 +236,13 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     addAndMakeVisible (syncFlavorCombo);
     syncFlavorAttachment = std::make_unique<ComboBoxAttachment> (audioProcessor.apvts, "syncFlavor", syncFlavorCombo);
 
+    // Les knobs du capot sont sur le circuit vert : leurs legendes doivent etre claires,
+    // pas de l'encre sombre comme sur la facade creme.
+    for (auto* k : { &driftRateKnob, &driftDepthKnob, &driftShapeKnob, &widthKnob,
+                     &bitcrushAmountKnob, &decimationAmountKnob, &saturationEmphasisKnob,
+                     &reverbPreDelayKnob, &reverbTransientKnob, &reverbBrightnessKnob, &crossFeedbackKnob })
+        k->label.setColour (juce::Label::textColourId, Skin::silk);
+
     addAndMakeVisible (advancedToggle);
     advancedToggle.setClickingTogglesState (true);
     advancedToggle.onClick = [this] { setShowingAdvanced (advancedToggle.getToggleState()); };
@@ -271,7 +290,9 @@ void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
     syncFlavorCombo.setVisible (shouldShow);
 
     // Le capot s'ouvre vers le HAUT : la fenetre grandit, la facade ne bouge pas.
-    setSize (1000, shouldShow ? 630 : 430);
+    // Hauteurs calees sur le CONTENU reel (bandeau 34 + marges 20 + zone la plus haute 220,
+    // le Master avec ses deux rangees + interrupteurs) - sinon les zones sont a moitie vides.
+    setSize (1000, shouldShow ? 200 + 280 : 280);
 }
 
 void DigitapeAudioProcessorEditor::drawZone (juce::Graphics& g, juce::Rectangle<int> area,
