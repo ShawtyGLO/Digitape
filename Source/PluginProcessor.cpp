@@ -268,7 +268,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "driftDepth", 1 }, "Derive profondeur",
-        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.2f,
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,   // 0 par defaut : le LFO est du caractere optionnel
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
