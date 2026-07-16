@@ -302,9 +302,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
+    // Defaut a 0 (2026-07-15) : le caractere est OPTIONNEL. Le plugin doit s'ouvrir propre
+    // (delay + reverbe polyvalents), on ajoute la corruption par-dessus - pas l'inverse.
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "integrity", 1 }, "Integrite",
-        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.25f,
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
@@ -347,6 +349,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::ParameterID { "delayLowpass", 1 }, "Delay LP",
         juce::NormalisableRange<float> (500.0f, 20000.0f, 0.01f, 0.3f), 20000.0f,
         juce::AudioParameterFloatAttributes().withLabel ("Hz")));
+
+    // Modulation du tank de reverbe : UN SEUL knob (rythme et profondeur fixes en interne,
+    // volontairement pas d'autres reglages exposes). Module legerement les lignes du tank ->
+    // casse les modes stationnaires qui rendent une reverbe figee/metallique. C'est ce que
+    // font les Lexicon de la lignee citee au concept. Un peu de modulation par defaut : ca
+    // ne "crade" pas le son, ca le rend lush - c'est de la qualite de coeur, pas du caractere.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverbModulation", 1 }, "Reverbe modulation",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
     return { params.begin(), params.end() };
 }
@@ -492,6 +505,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbSizeSmoothed.reset (sampleRate, smoothTime);
     reverbCharacterSmoothed.reset (sampleRate, smoothTime);
     reverbMixSmoothed.reset (sampleRate, smoothTime);
+    reverbModulationSmoothed.reset (sampleRate, smoothTime);
     reverbPreDelaySmoothed.reset (sampleRate, smoothTime);
     reverbTransientSmoothed.reset (sampleRate, smoothTime);
     reverbHighpassSmoothed.reset (sampleRate, smoothTime);
@@ -520,6 +534,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbSizeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbSize"));
     reverbCharacterSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbCharacter"));
     reverbMixSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbMix"));
+    reverbModulationSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbModulation"));
     reverbPreDelaySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbPreDelay"));
     reverbTransientSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbTransient"));
     reverbHighpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbHighpass"));
@@ -543,6 +558,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     steppedGlideR = 0.0f;
     widthChorusPhase = 0.0f;
     reactEnv = 0.0f;
+    reverbModPhase = 0.0f;
 
     for (int ch = 0; ch < 2; ++ch)
     {
@@ -665,6 +681,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     reverbSizeSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbSize"));
     reverbCharacterSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbCharacter"));
     reverbMixSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbMix"));
+    reverbModulationSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbModulation"));
     reverbPreDelaySmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbPreDelay"));
     reverbTransientSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbTransient"));
     reverbHighpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbHighpass"));
@@ -891,6 +908,13 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     constexpr float fdnTankAp1Coeff = 0.7f;
     constexpr float fdnTankAp2Coeff = 0.5f;
 
+    // Modulation du tank : un LFO lent, profondeur sub-milliseconde (plage classique facon
+    // Dattorro/Lexicon). Assez pour desaccorder les modes stationnaires sans donner un chorus
+    // audible. Rythme et profondeur max fixes en interne : un seul knob expose.
+    const float reverbModVal = reverbModulationSmoothed.getNextValue();
+    constexpr float reverbModRateHz = 0.6f;
+    const float reverbModDepth = reverbModVal * 0.0005f * (float) currentSampleRate;   // jusqu'a ~0.5 ms
+
     float fdnTankAp1Samples[2], fdnTankDelay1Samples[2], fdnTankAp2Samples[2], fdnTankDelay2Samples[2], fdnTankFeedbackGain[2];
     for (int a = 0; a < 2; ++a)
     {
@@ -956,6 +980,16 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     for (int n = 0; n < numSamples; ++n)
     {
+        // LFO de modulation du tank : une seule phase, 4 prises en quadrature pour que les
+        // lignes ne bougent pas toutes ensemble (sinon elles resteraient correlees).
+        reverbModPhase += reverbModRateHz / (float) currentSampleRate;
+        if (reverbModPhase >= 1.0f)
+            reverbModPhase -= 1.0f;
+
+        float modOff[4];
+        for (int i = 0; i < 4; ++i)
+            modOff[i] = std::sin ((reverbModPhase + i * 0.25f) * juce::MathConstants<float>::twoPi) * reverbModDepth;
+
         for (int ch = 0; ch < numChannels; ++ch)
         {
             auto* data = buffer.getWritePointer (ch);
@@ -981,7 +1015,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             float raw1[2], fed1[2], raw2[2];
             for (int a = 0; a < 2; ++a)
             {
-                raw1[a] = fdnTankDelay1[a].popSample (ch, fdnTankDelay1Samples[a]);
+                // Ligne longue modulee : c'est elle qui porte les modes stationnaires, donc
+                // la desaccorder legerement est ce qui tue le metallique.
+                raw1[a] = fdnTankDelay1[a].popSample (ch, juce::jmax (1.0f, fdnTankDelay1Samples[a] + modOff[a]));
                 fdnTankDampState[a][ch] += (raw1[a] - fdnTankDampState[a][ch]) * fdnDampCoeff;
                 fed1[a] = fdnTankDampState[a][ch] * fdnTankFeedbackGain[a];
 
@@ -1004,7 +1040,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             for (int a = 0; a < 2; ++a)
             {
                 const float armIn = 0.5f * diffused + raw2[1 - a];
-                const float wD1 = fdnTankAllpass1[a].popSample (ch, fdnTankAp1Samples[a]);
+                // Diffuseur module aussi (le geste classique de Dattorro), en quadrature avec
+                // la ligne longue pour decorreler les deux mouvements.
+                const float wD1 = fdnTankAllpass1[a].popSample (ch, juce::jmax (1.0f, fdnTankAp1Samples[a] + modOff[2 + a]));
                 const float w1  = armIn + fdnTankAp1Coeff * wD1;
                 fdnTankAllpass1[a].pushSample (ch, w1);
                 const float diffused1 = -fdnTankAp1Coeff * w1 + wD1;

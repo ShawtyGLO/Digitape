@@ -96,6 +96,12 @@ private:
 
     juce::SmoothedValue<float> reverbSizeSmoothed, reverbCharacterSmoothed, reverbMixSmoothed;
 
+    // Modulation du tank : un LFO lent unique, 4 prises decalees en phase, qui module
+    // legerement les lignes longues et les diffuseurs -> casse les modes stationnaires
+    // (le metallique/fige d'une reverbe statique).
+    juce::SmoothedValue<float> reverbModulationSmoothed;
+    float reverbModPhase { 0.0f };
+
     // Etages autour du moteur de reverbe (Transient, Input filter, Pre-delai, Brightness) -
     // ne touchent jamais le moteur lui-meme, survivront tels quels au reseau FDN.
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> preDelayLine { 96000 };

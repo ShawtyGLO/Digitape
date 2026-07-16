@@ -55,6 +55,7 @@ namespace UI
             constexpr Rect saturationTypeCombo    {  430.0f,   60.0f,  140.0f,   28.0f };
             constexpr Rect delayHighpassSlider    {   40.0f,  250.0f,   90.0f,   90.0f };
             constexpr Rect delayLowpassSlider     {  170.0f,  250.0f,   90.0f,   90.0f };
+            constexpr Rect reverbModulationSlider {  300.0f,  250.0f,   90.0f,   90.0f };
         }
     }
 
