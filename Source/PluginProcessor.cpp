@@ -346,6 +346,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
+    // Ducking : les effets s'effacent quand la source joue et refleurissent dans les trous.
+    // Reutilise le suiveur d'enveloppe de la Reactivite (deja la) - le classique qui fait
+    // tenir un delay/reverbe derriere une voix sans la noyer.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "ducking", 1 }, "Ducking",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
     // Filtre DANS LA BOUCLE du delay : chaque repetition le retraverse, donc les echos
     // s'assombrissent progressivement (comportement d'une bande). Sans lui, les repetitions
     // reviennent a pleine bande et s'empilent - dur sur une voix. Ouverts par defaut (neutre).
@@ -518,6 +527,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     saturationSmoothed.reset (sampleRate, smoothTime);
     saturationEmphasisSmoothed.reset (sampleRate, smoothTime);
     reactivitySmoothed.reset (sampleRate, smoothTime);
+    duckingSmoothed.reset (sampleRate, smoothTime);
     delayHighpassSmoothed.reset (sampleRate, smoothTime);
     delayLowpassSmoothed.reset (sampleRate, smoothTime);
     bitcrushAmountSmoothed.reset (sampleRate, smoothTime);
@@ -548,6 +558,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     saturationSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("saturation"));
     saturationEmphasisSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("saturationEmphasis"));
     reactivitySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reactivity"));
+    duckingSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("ducking"));
     delayHighpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("delayHighpass"));
     delayLowpassSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("delayLowpass"));
     bitcrushAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
@@ -680,6 +691,8 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     saturationSmoothed.setTargetValue (*apvts.getRawParameterValue ("saturation"));
     saturationEmphasisSmoothed.setTargetValue (*apvts.getRawParameterValue ("saturationEmphasis"));
     reactivitySmoothed.setTargetValue (*apvts.getRawParameterValue ("reactivity"));
+    duckingSmoothed.setTargetValue (*apvts.getRawParameterValue ("ducking"));
+    const float duckingBus = *apvts.getRawParameterValue ("ducking");
     delayHighpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("delayHighpass"));
     delayLowpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("delayLowpass"));
     bitcrushAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
@@ -761,6 +774,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float saturationAmt = saturationSmoothed.getNextValue();
         const float saturationEmph = saturationEmphasisSmoothed.getNextValue();
         const float reactivityAmt = reactivitySmoothed.getNextValue();
+        const float duckingAmt   = duckingSmoothed.getNextValue();
         const float syncAmt      = syncAmountSmoothed.getNextValue();
 
         // Reactivite interne : suit l'enveloppe (mono, pic) de l'ENTREE brute et pousse
@@ -777,6 +791,12 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float reactExcess = juce::jmax (0.0f, reactEnv - reactThreshold);
         const float reactDrive  = juce::jmin (1.0f, reactExcess / (1.0f - reactThreshold));
         const float effectiveIntegrity = juce::jlimit (0.0f, 1.0f, integrityAmt + reactDrive * reactivityAmt);
+
+        // Ducking : le meme suiveur, mais SANS seuil (contrairement a la Reactivite) - on veut
+        // que les effets reculent proportionnellement des que la source joue, pas seulement sur
+        // les pics. A fond, une source forte (env ~0.7) fait reculer l'humide d'environ 10 dB,
+        // et la traine revient dans les silences.
+        const float duckGain = juce::jlimit (0.0f, 1.0f, 1.0f - reactEnv * duckingAmt);
 
         const float effectiveTimeMs = timeMs * (1.0f - syncAmt) + syncedTimeMs * syncAmt;
 
@@ -872,12 +892,15 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // non-reverbe est deja dosee par le Mix global (sec*(1-Mix) + echo*Mix).
             const float delayWet = delayedSample * wetGainLin;
 
+            // Le ducking ne touche QUE ce qu'on entend, jamais ce qui alimente la reverbe :
+            // dryDelay reste intact, sinon on affamerait le moteur au lieu de baisser sa
+            // traine - la queue se mettrait a pomper au rythme de la source.
             float dryDelay = inputSample + delayWet;
             if (safetyOn)
                 dryDelay = softSafetyCeiling (dryDelay, 1.2f);
             dryDelayBuf.setSample (ch, n, dryDelay);
 
-            float directOut = inputSample * (1.0f - globalMix) + delayWet * globalMix;
+            float directOut = inputSample * (1.0f - globalMix) + delayWet * duckGain * globalMix;
             if (safetyOn)
                 directOut = softSafetyCeiling (directOut, 1.2f);
             directOutBuf.setSample (ch, n, directOut);
@@ -906,13 +929,18 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // taille. Le gain de chaque bras en decoule, compte tenu de la longueur reelle du tour.
     const float fdnDecaySeconds = juce::jmap (reverbDecayVal, 0.0f, 1.0f, 0.3f, 12.0f);
 
-    // CARACTERE : vrai axe structurel (cristallin -> casse), pas juste l'amortissement.
-    // Il pilote ENSEMBLE l'amortissement ET la quantite de diffusion : a 0 le tank est tres
-    // diffus et brillant (hall cristallin facon Lexicon) ; a 1 la diffusion s'effondre et le
-    // haut s'eteint -> echos discrets, metallique/casse (la "diffusion clairsemee" du concept).
+    // CARACTERE : axe structurel (cristallin -> sombre et moins dense), il pilote ENSEMBLE
+    // l'amortissement ET la quantite de diffusion.
+    // La plage de diffusion s'arrete a 0.45 et NON a 0.15 : en dessous de ~0.4 les allpass
+    // cessent de diffuser, le tank redevient un reseau de delais nus et on entend des echos
+    // discrets - percus comme des saccades dans la queue, pas comme un caractere. La
+    // perceptibilite est portee par l'amortissement (16k -> 1.5k, tres audible) ; la
+    // diffusion apporte le changement de densite sans jamais casser la queue.
+    // Le "casse/glitche" extreme du concept est le travail de l'Integrite (le module de
+    // corruption), pas du coeur de la reverbe, qui doit rester musical sur toute sa course.
     const float fdnDampCutoffHz = juce::jmap (reverbCharVal, 0.0f, 1.0f, 16000.0f, 1500.0f);
     const float fdnDampCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * fdnDampCutoffHz / (float) currentSampleRate);
-    const float fdnDiffusion = juce::jmap (reverbCharVal, 0.0f, 1.0f, 0.78f, 0.15f);
+    const float fdnDiffusion = juce::jmap (reverbCharVal, 0.0f, 1.0f, 0.78f, 0.45f);
 
     // ECART STEREO : les deux canaux traversaient des lignes IDENTIQUES, donc une entree
     // mono ressortait mono - la reverbe ne s'elargissait pas. On decorrele les longueurs
@@ -1163,8 +1191,12 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // Sortie = part non-reverbe deja dosee par le Mix global (directData) + terme
             // reverbe (a son volume) dose par le meme Mix global. A Mix=0 : sortie seche
             // pure ; a Mix=1 : sec efface, echo+reverbe a leurs volumes respectifs.
+            // Ducking applique ICI et pas plus tot : la Reinjection croisee (capturee juste
+            // au-dessus) est un circuit interne et garde la reverbe pleine, sinon la boucle
+            // croisee pomperait au rythme de la source. Le ducking est un dosage de SORTIE.
+            const float duckB = juce::jlimit (0.0f, 1.0f, 1.0f - reactEnvBuf.getSample (0, n) * duckingBus);
             const float gm = globalMixBuf.getSample (0, n);
-            float mixed = directData[n] + reverbContribution * gm;
+            float mixed = directData[n] + reverbContribution * duckB * gm;
             if (safetyOn)
                 mixed = softSafetyCeiling (mixed, 1.2f);
 

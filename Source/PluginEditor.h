@@ -113,7 +113,7 @@ private:
     KnobWithLabel saturationKnob;                                              // Preampli
     KnobWithLabel timeKnob, feedbackKnob, wetGainKnob, syncAmountKnob;         // Delay
     KnobWithLabel reverbSizeKnob, reverbDecayKnob, reverbCharacterKnob, reverbMixKnob, reverbModulationKnob; // Reverbe
-    KnobWithLabel mixKnob, outputGainKnob, integrityKnob, reactivityKnob;      // Master
+    KnobWithLabel mixKnob, outputGainKnob, integrityKnob, reactivityKnob, duckingKnob; // Master
 
     std::unique_ptr<FilterRangeSlider> delayFilter, reverbFilter;
 

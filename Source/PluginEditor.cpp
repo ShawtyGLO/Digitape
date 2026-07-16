@@ -221,6 +221,7 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     setupKnob (outputGainKnob,       "outputGain",       "Volume");
     setupKnob (integrityKnob,        "integrity",        "Integrite");
     setupKnob (reactivityKnob,       "reactivity",       "Reactivite");
+    setupKnob (duckingKnob,          "ducking",          "Ducking");
 
     delayFilter  = std::make_unique<FilterRangeSlider> (audioProcessor.apvts, "delayHighpass",  "delayLowpass",  "Filtre delay");
     reverbFilter = std::make_unique<FilterRangeSlider> (audioProcessor.apvts, "reverbHighpass", "reverbLowpass", "Filtre reverbe");
@@ -312,7 +313,9 @@ void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
     // Le capot s'ouvre vers le HAUT : la fenetre grandit, la facade ne bouge pas.
     // Hauteurs calees sur le CONTENU reel (bandeau 34 + marges 20 + zone la plus haute 220,
     // le Master avec ses deux rangees + interrupteurs) - sinon les zones sont a moitie vides.
-    setSize (1060, shouldShow ? 200 + 280 : 280);
+    // 1140 et non 1060 : le Ducking fait une 3e colonne dans le Master, qui serait a l'etroit
+    // sinon. L'utilisateur voulait de toute facon la facade un peu plus large.
+    setSize (1140, shouldShow ? 200 + 280 : 280);
 }
 
 void DigitapeAudioProcessorEditor::drawZone (juce::Graphics& g, juce::Rectangle<int> area,
@@ -463,20 +466,24 @@ void DigitapeAudioProcessorEditor::resized()
         reverbFilter->setBounds (z.removeFromTop (34));
     }
 
-    // Master : mix / volume / integrite / reactivite + interrupteurs.
+    // Master : deux rangees de 3 colonnes alignees. Ducking est pose a cote de Reactivite :
+    // les deux partagent le meme suiveur d'enveloppe, autant que ca se voie. Les interrupteurs
+    // occupent la 3e cellule du bas plutot qu'une rangee a eux - la facade fait 280 de haut,
+    // il n'y a la place que pour deux rangees de knobs.
     {
         auto z = zMaster.reduced (10, 0).withTrimmedTop (26).withTrimmedBottom (10);
+        const int w = z.getWidth() / 3;
         auto r1 = z.removeFromTop (76);
-        const int w = r1.getWidth() / 2;
         placeKnob (mixKnob,        r1.removeFromLeft (w).reduced (4, 0));
         placeKnob (outputGainKnob, r1.removeFromLeft (w).reduced (4, 0));
+        placeKnob (duckingKnob,    r1.removeFromLeft (w).reduced (4, 0));
         z.removeFromTop (6);
         auto r2 = z.removeFromTop (76);
         placeKnob (integrityKnob,  r2.removeFromLeft (w).reduced (4, 0));
         placeKnob (reactivityKnob, r2.removeFromLeft (w).reduced (4, 0));
-        z.removeFromTop (4);
-        auto btns = z.removeFromTop (22);
-        monoButton.setBounds (btns.removeFromLeft (w).reduced (4, 0));
-        safetyButton.setBounds (btns.reduced (4, 0));
+        auto btns = r2.removeFromLeft (w).reduced (4, 12);
+        monoButton.setBounds (btns.removeFromTop (24));
+        btns.removeFromTop (4);
+        safetyButton.setBounds (btns.removeFromTop (24));
     }
 }

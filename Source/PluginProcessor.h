@@ -142,7 +142,8 @@ private:
     PreampState preampState[2];
 
     // Reactivite interne : suiveur d'enveloppe (mono) sur l'entree, routé vers l'Integrite.
-    juce::SmoothedValue<float> reactivitySmoothed;
+    // Le meme suiveur alimente le Ducking (les effets s'effacent quand la source joue).
+    juce::SmoothedValue<float> reactivitySmoothed, duckingSmoothed;
     float reactEnv { 0.0f };
 
     // Filtre DANS LA BOUCLE du delay. Chaque passage refiltre, donc les repetitions
