@@ -961,10 +961,14 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float fdnDampCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * fdnDampCutoffHz / (float) currentSampleRate);
     const float fdnDiffusion = juce::jmap (reverbCharVal, 0.0f, 1.0f, 0.78f, 0.45f);
 
-    // ECART STEREO : les deux canaux traversaient des lignes IDENTIQUES, donc une entree
-    // mono ressortait mono - la reverbe ne s'elargissait pas. On decorrele les longueurs
-    // L/R (leger ecart), pilote par Largeur (et annule par Mono, qui met Largeur a 0).
-    const float reverbSpread = juce::jlimit (0.0f, 1.0f, monoEngaged ? 0.0f : *apvts.getRawParameterValue ("width") * 0.5f) * 0.05f;
+    // ECART STEREO par PRISES DIFFERENTES, et non par desaccord des lignes. La version
+    // precedente allongeait les lignes d'un canal et raccourcissait celles de l'autre (+-5%) :
+    // ca decorrelait, mais deux tanks de longueurs differentes ne sonnent pas a la meme
+    // hauteur - L et R etaient legerement desaccordes l'un par rapport a l'autre.
+    // Ici (approche Dattorro) les lignes des deux canaux sont IDENTIQUES et on lit chaque
+    // canal a des positions differentes DANS sa ligne : deux signaux decorreles, meme
+    // hauteur. A Largeur 0 / Mono les deux canaux lisent aux memes positions -> mono exact.
+    const float reverbSpread = juce::jlimit (0.0f, 1.0f, monoEngaged ? 0.0f : *apvts.getRawParameterValue ("width") * 0.5f);
 
     // Pre-diffusion : 4 allpass en serie, temps espaces sans rapports simples entre eux.
     static constexpr float fdnAllpassTimesMs[4] = { 5.3f, 8.9f, 13.1f, 17.9f };
@@ -1026,6 +1030,24 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         // sous 1 - le grave peut tenir tres longtemps, jamais grossir.
         fdnTankBassGain[a] = juce::jmin (0.995f, fdnTankFeedbackGain[a] * reverbBassMult);
     }
+
+    // Positions de prise, en fraction de chaque ligne. Le canal 0 fixe la reference ; le
+    // canal 1 s'en ecarte a mesure que Largeur monte (a 0 il lit aux memes positions, donc
+    // sortie strictement mono - pas de residu comme avec un desaccord qui ne revient jamais
+    // vraiment a zero). Fractions sans rapports simples entre elles, pour que les prises ne
+    // retombent pas sur les memes echos.
+    static constexpr float tapFrac1[2][2] = { { 0.31f, 0.67f }, { 0.58f, 0.89f } };
+    static constexpr float tapFrac2[2][2] = { { 0.43f, 0.79f }, { 0.71f, 0.37f } };
+
+    float tapD1[2][2], tapD2[2][2];
+    for (int c = 0; c < 2; ++c)
+        for (int a = 0; a < 2; ++a)
+        {
+            const float f1 = tapFrac1[0][a] + (tapFrac1[c][a] - tapFrac1[0][a]) * reverbSpread;
+            const float f2 = tapFrac2[0][a] + (tapFrac2[c][a] - tapFrac2[0][a]) * reverbSpread;
+            tapD1[c][a] = juce::jmax (1.0f, fdnTankDelay1Samples[a] * f1);
+            tapD2[c][a] = juce::jmax (1.0f, fdnTankDelay2Samples[a] * f2);
+        }
 
 
     // Etages d'entree : Transient (adoucit l'attaque courte pour une reverbe plus
@@ -1089,11 +1111,6 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             auto* data = buffer.getWritePointer (ch);
             float diffused = data[n];
 
-            // Ecart stereo : le canal gauche raccourcit ses lignes, le droit les rallonge.
-            // Deux tanks legerement differents = deux queues decorrelees, donc une reverbe
-            // qui s'elargit reellement (meme sur une entree mono). A Largeur 0 / Mono : 1.0.
-            const float chScale = (ch == 0 ? 1.0f - reverbSpread : 1.0f + reverbSpread);
-
             // Pre-diffusion : 4 allpass Schroeder en serie, brouille les premieres
             // reflexions sans colorer le spectre (structure allpass = gain unite a
             // toute frequence par construction).
@@ -1111,12 +1128,21 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // qui ressort nourrit le bras OPPOSE. Le tap de sortie prend les DEUX
             // lignes (positions differentes dans la boucle) plutot qu'un seul point,
             // pour une densite d'echos que le simple aller-retour ne donnait pas.
+            // Prises de sortie : lues AVANT que la boucle ne consomme les lignes, et surtout
+            // sans deplacer le pointeur de lecture (updateReadPointer = false) - ce sont des
+            // fenetres sur la ligne, elles ne doivent rien changer a la circulation du tank.
+            float tapOut = 0.0f;
+            const int tapCh = juce::jmin (ch, 1);
+
             float raw1[2], fed1[2], raw2[2];
             for (int a = 0; a < 2; ++a)
             {
+                tapOut += fdnTankDelay1[a].popSample (ch, tapD1[tapCh][a], false);
+                tapOut += fdnTankDelay2[a].popSample (ch, tapD2[tapCh][a], false);
+
                 // Ligne longue modulee : c'est elle qui porte les modes stationnaires, donc
                 // la desaccorder legerement est ce qui tue le metallique.
-                raw1[a] = fdnTankDelay1[a].popSample (ch, juce::jmax (1.0f, fdnTankDelay1Samples[a] * chScale + modOff[a]));
+                raw1[a] = fdnTankDelay1[a].popSample (ch, juce::jmax (1.0f, fdnTankDelay1Samples[a] + modOff[a]));
                 fdnTankDampState[a][ch] += (raw1[a] - fdnTankDampState[a][ch]) * fdnDampCoeff;
                 const float damped = fdnTankDampState[a][ch];
 
@@ -1129,13 +1155,13 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 const float bass = fdnTankBassState[a][ch];
                 fed1[a] = bass * fdnTankBassGain[a] + (damped - bass) * fdnTankFeedbackGain[a];
 
-                raw2[a] = fdnTankDelay2[a].popSample (ch, juce::jmax (1.0f, fdnTankDelay2Samples[a] * chScale));
+                raw2[a] = fdnTankDelay2[a].popSample (ch, juce::jmax (1.0f, fdnTankDelay2Samples[a]));
             }
 
             // Deuxieme diffusion, mi-parcours, avant la seconde ligne.
             for (int a = 0; a < 2; ++a)
             {
-                const float wD2 = fdnTankAllpass2[a].popSample (ch, juce::jmax (1.0f, fdnTankAp2Samples[a] * chScale));
+                const float wD2 = fdnTankAllpass2[a].popSample (ch, juce::jmax (1.0f, fdnTankAp2Samples[a]));
                 const float w2  = fed1[a] + fdnTankAp2Coeff * wD2;
                 fdnTankAllpass2[a].pushSample (ch, w2);
                 const float diffused2 = -fdnTankAp2Coeff * w2 + wD2;
@@ -1150,16 +1176,17 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 const float armIn = 0.5f * diffused + raw2[1 - a];
                 // Diffuseur module aussi (le geste classique de Dattorro), en quadrature avec
                 // la ligne longue pour decorreler les deux mouvements.
-                const float wD1 = fdnTankAllpass1[a].popSample (ch, juce::jmax (1.0f, fdnTankAp1Samples[a] * chScale + modOff[2 + a]));
+                const float wD1 = fdnTankAllpass1[a].popSample (ch, juce::jmax (1.0f, fdnTankAp1Samples[a] + modOff[2 + a]));
                 const float w1  = armIn + fdnTankAp1Coeff * wD1;
                 fdnTankAllpass1[a].pushSample (ch, w1);
                 const float diffused1 = -fdnTankAp1Coeff * w1 + wD1;
                 fdnTankDelay1[a].pushSample (ch, diffused1);
             }
 
-            // Makeup +6 dB (0.5 au lieu de 0.25) : la sortie du tank sortait trop basse
-            // pour que Reverb volume la ramene a un niveau audible.
-            data[n] = 0.5f * (raw1[0] + raw1[1] + raw2[0] + raw2[1]);
+            // Sortie = les 4 prises (positions propres au canal), et non plus les lectures de
+            // la boucle : c'est ce qui porte desormais l'image stereo. Meme makeup (+6 dB) et
+            // meme nombre de termes qu'avant, donc le niveau ne bouge pas.
+            data[n] = 0.5f * tapOut;
         }
     }
 
