@@ -213,6 +213,7 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     setupKnob (wetGainKnob,          "wetGain",          "Echo vol");
     setupKnob (syncAmountKnob,       "syncAmount",       "Sync");
     setupKnob (reverbSizeKnob,       "reverbSize",       "Taille");
+    setupKnob (reverbDecayKnob,      "reverbDecay",      "Longueur");
     setupKnob (reverbCharacterKnob,  "reverbCharacter",  "Caractere");
     setupKnob (reverbMixKnob,        "reverbMix",        "Reverb vol");
     setupKnob (reverbModulationKnob, "reverbModulation", "Modulation");
@@ -311,7 +312,7 @@ void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
     // Le capot s'ouvre vers le HAUT : la fenetre grandit, la facade ne bouge pas.
     // Hauteurs calees sur le CONTENU reel (bandeau 34 + marges 20 + zone la plus haute 220,
     // le Master avec ses deux rangees + interrupteurs) - sinon les zones sont a moitie vides.
-    setSize (1000, shouldShow ? 200 + 280 : 280);
+    setSize (1060, shouldShow ? 200 + 280 : 280);
 }
 
 void DigitapeAudioProcessorEditor::drawZone (juce::Graphics& g, juce::Rectangle<int> area,
@@ -419,11 +420,11 @@ void DigitapeAudioProcessorEditor::resized()
 
     face = face.reduced (12, 10);
 
-    zPreamp = face.removeFromLeft (128);
+    zPreamp = face.removeFromLeft (124);
     face.removeFromLeft (8);
-    zDelay  = face.removeFromLeft (292);
+    zDelay  = face.removeFromLeft (286);
     face.removeFromLeft (8);
-    zReverb = face.removeFromLeft (292);
+    zReverb = face.removeFromLeft (350);   // 5 knobs : Taille, Longueur, Caractere, Modulation, Vol
     face.removeFromLeft (8);
     zMaster = face;
 
@@ -448,15 +449,16 @@ void DigitapeAudioProcessorEditor::resized()
         delayFilter->setBounds (z.removeFromTop (34));
     }
 
-    // Reverbe : 4 knobs + le filtre en un seul controle.
+    // Reverbe : 5 knobs (Taille et Longueur sont deux choses distinctes) + le filtre.
     {
         auto z = zReverb.reduced (10, 0).withTrimmedTop (26).withTrimmedBottom (10);
         auto knobs = z.removeFromTop (76);
-        const int w = knobs.getWidth() / 4;
-        placeKnob (reverbSizeKnob,       knobs.removeFromLeft (w).reduced (4, 0));
-        placeKnob (reverbCharacterKnob,  knobs.removeFromLeft (w).reduced (4, 0));
-        placeKnob (reverbModulationKnob, knobs.removeFromLeft (w).reduced (4, 0));
-        placeKnob (reverbMixKnob,        knobs.removeFromLeft (w).reduced (4, 0));
+        const int w = knobs.getWidth() / 5;
+        placeKnob (reverbSizeKnob,       knobs.removeFromLeft (w).reduced (3, 0));
+        placeKnob (reverbDecayKnob,      knobs.removeFromLeft (w).reduced (3, 0));
+        placeKnob (reverbCharacterKnob,  knobs.removeFromLeft (w).reduced (3, 0));
+        placeKnob (reverbModulationKnob, knobs.removeFromLeft (w).reduced (3, 0));
+        placeKnob (reverbMixKnob,        knobs.removeFromLeft (w).reduced (3, 0));
         z.removeFromTop (10);
         reverbFilter->setBounds (z.removeFromTop (34));
     }

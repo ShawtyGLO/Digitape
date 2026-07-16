@@ -198,6 +198,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
+    // Longueur (RT60) : separee de la Taille. Avant, "Taille" pilotait en fait la
+    // decroissance et rien ne changeait les dimensions du tank - d'ou l'impression qu'il
+    // manquait un controle de longueur.
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "reverbDecay", 1 }, "Reverbe longueur",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.45f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "reverbCharacter", 1 }, "Reverbe caractere",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f,
@@ -442,33 +451,35 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     delayLine.prepare (spec);
     delayLine.reset();
 
+    // Marges genereuses : la Taille etire les lignes du tank (jusqu'a 1.8x) et l'ecart
+    // stereo/modulation s'ajoute par-dessus - il faut de la place au-dela des temps de base.
     for (auto& d : fdnAllpassDelay)
     {
-        d.setMaximumDelayInSamples ((int) (0.05 * sampleRate));
+        d.setMaximumDelayInSamples ((int) (0.12 * sampleRate));
         d.prepare (spec);
         d.reset();
     }
     for (auto& d : fdnTankAllpass1)
     {
-        d.setMaximumDelayInSamples ((int) (0.1 * sampleRate));
+        d.setMaximumDelayInSamples ((int) (0.25 * sampleRate));
         d.prepare (spec);
         d.reset();
     }
     for (auto& d : fdnTankDelay1)
     {
-        d.setMaximumDelayInSamples ((int) (0.2 * sampleRate));
+        d.setMaximumDelayInSamples ((int) (0.5 * sampleRate));
         d.prepare (spec);
         d.reset();
     }
     for (auto& d : fdnTankAllpass2)
     {
-        d.setMaximumDelayInSamples ((int) (0.1 * sampleRate));
+        d.setMaximumDelayInSamples ((int) (0.25 * sampleRate));
         d.prepare (spec);
         d.reset();
     }
     for (auto& d : fdnTankDelay2)
     {
-        d.setMaximumDelayInSamples ((int) (0.2 * sampleRate));
+        d.setMaximumDelayInSamples ((int) (0.5 * sampleRate));
         d.prepare (spec);
         d.reset();
     }
@@ -514,6 +525,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     wetGainSmoothed.reset (sampleRate, smoothTime);
     syncAmountSmoothed.reset (sampleRate, smoothTime);
     reverbSizeSmoothed.reset (sampleRate, smoothTime);
+    reverbDecaySmoothed.reset (sampleRate, smoothTime);
     reverbCharacterSmoothed.reset (sampleRate, smoothTime);
     reverbMixSmoothed.reset (sampleRate, smoothTime);
     reverbModulationSmoothed.reset (sampleRate, smoothTime);
@@ -543,6 +555,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     wetGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("wetGain"));
     syncAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("syncAmount"));
     reverbSizeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbSize"));
+    reverbDecaySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbDecay"));
     reverbCharacterSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbCharacter"));
     reverbMixSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbMix"));
     reverbModulationSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbModulation"));
@@ -685,6 +698,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     wetGainSmoothed.setTargetValue (*apvts.getRawParameterValue ("wetGain"));
     syncAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("syncAmount"));
     reverbSizeSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbSize"));
+    reverbDecaySmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbDecay"));
     reverbCharacterSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbCharacter"));
     reverbMixSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbMix"));
     reverbModulationSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbModulation"));
@@ -874,6 +888,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // Alimentee par le sec+echo (dryDelayBuf). Taille pilote la decroissance, Caractere
     // l'amortissement par ligne.
     const float reverbSizeVal   = reverbSizeSmoothed.getNextValue();
+    const float reverbDecayVal  = reverbDecaySmoothed.getNextValue();
     const float reverbCharVal   = reverbCharacterSmoothed.getNextValue();
     const float reverbMixVal    = reverbMixSmoothed.getNextValue();
     const float preDelayMs      = reverbPreDelaySmoothed.getNextValue();
@@ -882,22 +897,35 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float lowpassHz       = reverbLowpassSmoothed.getNextValue();
     const float brightnessVal   = reverbBrightnessSmoothed.getNextValue();
 
-    // FDN : Caractere pilote l'amortissement (cristallin=aigus preserves, casse=sombre) ;
-    // Taille/Decroissance pilote un temps de decroissance (RT60-like) commun aux deux
-    // bras du tank, chacun avec le gain de reinjection qui lui correspond compte tenu
-    // de sa longueur.
+    // TAILLE : etire vraiment les lignes du tank (les dimensions de la piece). Avant, les
+    // longueurs etaient figees et "Taille" ne faisait que la decroissance - d'ou l'impression
+    // qu'il manquait un controle de longueur.
+    const float fdnSizeFactor = juce::jmap (reverbSizeVal, 0.0f, 1.0f, 0.5f, 1.8f);
+
+    // LONGUEUR : la decroissance (RT60), desormais son propre parametre, independant de la
+    // taille. Le gain de chaque bras en decoule, compte tenu de la longueur reelle du tour.
+    const float fdnDecaySeconds = juce::jmap (reverbDecayVal, 0.0f, 1.0f, 0.3f, 12.0f);
+
+    // CARACTERE : vrai axe structurel (cristallin -> casse), pas juste l'amortissement.
+    // Il pilote ENSEMBLE l'amortissement ET la quantite de diffusion : a 0 le tank est tres
+    // diffus et brillant (hall cristallin facon Lexicon) ; a 1 la diffusion s'effondre et le
+    // haut s'eteint -> echos discrets, metallique/casse (la "diffusion clairsemee" du concept).
     const float fdnDampCutoffHz = juce::jmap (reverbCharVal, 0.0f, 1.0f, 16000.0f, 1500.0f);
     const float fdnDampCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * fdnDampCutoffHz / (float) currentSampleRate);
-    const float fdnDecaySeconds = juce::jmap (reverbSizeVal, 0.0f, 1.0f, 0.3f, 8.0f);
+    const float fdnDiffusion = juce::jmap (reverbCharVal, 0.0f, 1.0f, 0.78f, 0.15f);
 
-    // Pre-diffusion (inchangee) : 4 allpass en serie, temps espaces sans rapports
-    // simples entre eux.
+    // ECART STEREO : les deux canaux traversaient des lignes IDENTIQUES, donc une entree
+    // mono ressortait mono - la reverbe ne s'elargissait pas. On decorrele les longueurs
+    // L/R (leger ecart), pilote par Largeur (et annule par Mono, qui met Largeur a 0).
+    const float reverbSpread = juce::jlimit (0.0f, 1.0f, monoEngaged ? 0.0f : *apvts.getRawParameterValue ("width") * 0.5f) * 0.05f;
+
+    // Pre-diffusion : 4 allpass en serie, temps espaces sans rapports simples entre eux.
     static constexpr float fdnAllpassTimesMs[4] = { 5.3f, 8.9f, 13.1f, 17.9f };
-    constexpr float fdnAllpassCoeff = 0.6f;
+    const float fdnAllpassCoeff = fdnDiffusion;
 
     float fdnAllpassSamples[4];
     for (int i = 0; i < 4; ++i)
-        fdnAllpassSamples[i] = fdnAllpassTimesMs[i] * 0.001f * (float) currentSampleRate;
+        fdnAllpassSamples[i] = fdnAllpassTimesMs[i] * 0.001f * (float) currentSampleRate * fdnSizeFactor;
 
     // Tank a 2 bras croises (figure-8, lignee Lexicon/EMT/Dattorro) : chaque bras a
     // DEUX etages allpass+delay en serie (pas un seul) - premier passage : diffuse ->
@@ -909,8 +937,8 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     static constexpr float fdnTankDelay1TimesMs[2] = { 118.6f, 105.1f };
     static constexpr float fdnTankAp2TimesMs[2]    = { 61.3f, 74.9f };
     static constexpr float fdnTankDelay2TimesMs[2] = { 89.7f, 71.3f };
-    constexpr float fdnTankAp1Coeff = 0.7f;
-    constexpr float fdnTankAp2Coeff = 0.5f;
+    const float fdnTankAp1Coeff = fdnDiffusion;
+    const float fdnTankAp2Coeff = fdnDiffusion * 0.75f;
 
     // Modulation du tank : un LFO lent, profondeur sub-milliseconde (plage classique facon
     // Dattorro/Lexicon). Assez pour desaccorder les modes stationnaires sans donner un chorus
@@ -919,15 +947,23 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     constexpr float reverbModRateHz = 0.6f;
     const float reverbModDepth = reverbModVal * 0.0005f * (float) currentSampleRate;   // jusqu'a ~0.5 ms
 
+    // Toutes les longueurs du tank suivent la Taille. Le gain de reinjection est recalcule
+    // sur le tour REEL (donc etire lui aussi) : la Longueur reste tenue quelle que soit la
+    // Taille - agrandir la piece ne raccourcit pas la queue.
     float fdnTankAp1Samples[2], fdnTankDelay1Samples[2], fdnTankAp2Samples[2], fdnTankDelay2Samples[2], fdnTankFeedbackGain[2];
     for (int a = 0; a < 2; ++a)
     {
-        fdnTankAp1Samples[a]    = fdnTankAp1TimesMs[a]    * 0.001f * (float) currentSampleRate;
-        fdnTankDelay1Samples[a] = fdnTankDelay1TimesMs[a] * 0.001f * (float) currentSampleRate;
-        fdnTankAp2Samples[a]    = fdnTankAp2TimesMs[a]    * 0.001f * (float) currentSampleRate;
-        fdnTankDelay2Samples[a] = fdnTankDelay2TimesMs[a] * 0.001f * (float) currentSampleRate;
-        const float roundTripSeconds = (fdnTankAp1TimesMs[a] + fdnTankDelay1TimesMs[a]
-                                       + fdnTankAp2TimesMs[a] + fdnTankDelay2TimesMs[a]) * 0.001f;
+        const float ap1Ms = fdnTankAp1TimesMs[a]    * fdnSizeFactor;
+        const float d1Ms  = fdnTankDelay1TimesMs[a] * fdnSizeFactor;
+        const float ap2Ms = fdnTankAp2TimesMs[a]    * fdnSizeFactor;
+        const float d2Ms  = fdnTankDelay2TimesMs[a] * fdnSizeFactor;
+
+        fdnTankAp1Samples[a]    = ap1Ms * 0.001f * (float) currentSampleRate;
+        fdnTankDelay1Samples[a] = d1Ms  * 0.001f * (float) currentSampleRate;
+        fdnTankAp2Samples[a]    = ap2Ms * 0.001f * (float) currentSampleRate;
+        fdnTankDelay2Samples[a] = d2Ms  * 0.001f * (float) currentSampleRate;
+
+        const float roundTripSeconds = (ap1Ms + d1Ms + ap2Ms + d2Ms) * 0.001f;
         fdnTankFeedbackGain[a] = std::pow (10.0f, -3.0f * roundTripSeconds / fdnDecaySeconds);
     }
 
@@ -969,9 +1005,6 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float duck = juce::jlimit (0.0f, 1.0f, transientAmt * spike * 6.0f);
             x *= (1.0f - duck);
 
-            x = reverbHpFilter.processSample (ch, x);
-            x = reverbLpFilter.processSample (ch, x);
-
             const float preDelayed = preDelayLine.popSample (ch, preDelaySamples);
             preDelayLine.pushSample (ch, x);
 
@@ -996,6 +1029,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             auto* data = buffer.getWritePointer (ch);
             float diffused = data[n];
 
+            // Ecart stereo : le canal gauche raccourcit ses lignes, le droit les rallonge.
+            // Deux tanks legerement differents = deux queues decorrelees, donc une reverbe
+            // qui s'elargit reellement (meme sur une entree mono). A Largeur 0 / Mono : 1.0.
+            const float chScale = (ch == 0 ? 1.0f - reverbSpread : 1.0f + reverbSpread);
+
             // Pre-diffusion : 4 allpass Schroeder en serie, brouille les premieres
             // reflexions sans colorer le spectre (structure allpass = gain unite a
             // toute frequence par construction).
@@ -1018,17 +1056,17 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             {
                 // Ligne longue modulee : c'est elle qui porte les modes stationnaires, donc
                 // la desaccorder legerement est ce qui tue le metallique.
-                raw1[a] = fdnTankDelay1[a].popSample (ch, juce::jmax (1.0f, fdnTankDelay1Samples[a] + modOff[a]));
+                raw1[a] = fdnTankDelay1[a].popSample (ch, juce::jmax (1.0f, fdnTankDelay1Samples[a] * chScale + modOff[a]));
                 fdnTankDampState[a][ch] += (raw1[a] - fdnTankDampState[a][ch]) * fdnDampCoeff;
                 fed1[a] = fdnTankDampState[a][ch] * fdnTankFeedbackGain[a];
 
-                raw2[a] = fdnTankDelay2[a].popSample (ch, fdnTankDelay2Samples[a]);
+                raw2[a] = fdnTankDelay2[a].popSample (ch, juce::jmax (1.0f, fdnTankDelay2Samples[a] * chScale));
             }
 
             // Deuxieme diffusion, mi-parcours, avant la seconde ligne.
             for (int a = 0; a < 2; ++a)
             {
-                const float wD2 = fdnTankAllpass2[a].popSample (ch, fdnTankAp2Samples[a]);
+                const float wD2 = fdnTankAllpass2[a].popSample (ch, juce::jmax (1.0f, fdnTankAp2Samples[a] * chScale));
                 const float w2  = fed1[a] + fdnTankAp2Coeff * wD2;
                 fdnTankAllpass2[a].pushSample (ch, w2);
                 const float diffused2 = -fdnTankAp2Coeff * w2 + wD2;
@@ -1043,7 +1081,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 const float armIn = 0.5f * diffused + raw2[1 - a];
                 // Diffuseur module aussi (le geste classique de Dattorro), en quadrature avec
                 // la ligne longue pour decorreler les deux mouvements.
-                const float wD1 = fdnTankAllpass1[a].popSample (ch, juce::jmax (1.0f, fdnTankAp1Samples[a] + modOff[2 + a]));
+                const float wD1 = fdnTankAllpass1[a].popSample (ch, juce::jmax (1.0f, fdnTankAp1Samples[a] * chScale + modOff[2 + a]));
                 const float w1  = armIn + fdnTankAp1Coeff * wD1;
                 fdnTankAllpass1[a].pushSample (ch, w1);
                 const float diffused1 = -fdnTankAp1Coeff * w1 + wD1;
@@ -1077,7 +1115,14 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const auto* directData = directOutBuf.getReadPointer (ch);
         for (int n = 0; n < numSamples; ++n)
         {
+            // Filtre de la reverbe : applique EN SORTIE, pas a l'entree du tank. En pre, il ne
+            // touchait que ce qui entrait : la queue deja dans le tank gardait son ancien
+            // spectre, donc bouger le filtre mettait plusieurs secondes a s'entendre (la
+            // "latence" ressentie). En post, il agit sur toute la queue, immediatement.
             float wet = data[n];
+            wet = reverbHpFilter.processSample (ch, wet);
+            wet = reverbLpFilter.processSample (ch, wet);
+
             tiltLpState[ch] += (wet - tiltLpState[ch]) * tiltCoeff;
             const float lowBand  = tiltLpState[ch];
             const float highBand = wet - lowBand;

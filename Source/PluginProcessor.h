@@ -94,7 +94,7 @@ private:
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> fdnTankDelay2[2];
     float fdnTankDampState[2][2] {};
 
-    juce::SmoothedValue<float> reverbSizeSmoothed, reverbCharacterSmoothed, reverbMixSmoothed;
+    juce::SmoothedValue<float> reverbSizeSmoothed, reverbDecaySmoothed, reverbCharacterSmoothed, reverbMixSmoothed;
 
     // Modulation du tank : un LFO lent unique, 4 prises decalees en phase, qui module
     // legerement les lignes longues et les diffuseurs -> casse les modes stationnaires
