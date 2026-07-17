@@ -15,6 +15,17 @@ struct PreampState
     float outEnv  = 0.0f;   // enveloppe RMS de la sortie (auto-gain)
 };
 
+// Etat par canal du Debordement : ou en est l'excursion en cours, si elle a ete tiree comme
+// dechirure, et le generateur qui fait ce tirage. Le generateur est seme explicitement plutot
+// que laisse au hasard de l'horloge : c'est le premier alea du plugin, et Cycle devra pouvoir
+// le reproduire a l'identique a partir d'une simple graine.
+struct OverflowState
+{
+    bool over = false;          // l'echantillon precedent depassait-il le plafond ?
+    bool tear = false;          // l'excursion en cours a-t-elle ete tiree comme dechirure ?
+    juce::Random rng;
+};
+
 // Digitape — Moteur temps (v0) : ligne a retard a vitesse modulee, avec reinjection et derive.
 class DigitapeAudioProcessor : public juce::AudioProcessor
 {
@@ -77,6 +88,12 @@ private:
     float holdPhaseBus[2] { 0.0f, 0.0f };
     float heldValueBus[2] { 0.0f, 0.0f };
     float decimLpStateBus[2] { 0.0f, 0.0f };
+
+    // Debordement : meme decoupage en deux etages que l'Integrite (boucle echo + bus reverbe),
+    // etats separes. Dans la boucle, chaque repetition redeborde -> les echos se dechirent
+    // PROGRESSIVEMENT, comme la bande s'abime a chaque passage.
+    juce::SmoothedValue<float> overflowSmoothed;
+    OverflowState overflowLoop[2], overflowBus[2];
 
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLine { 192000 };
 

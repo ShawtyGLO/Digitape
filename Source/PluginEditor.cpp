@@ -222,6 +222,7 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     setupKnob (integrityKnob,        "integrity",        "Integrite");
     setupKnob (reactivityKnob,       "reactivity",       "Reactivite");
     setupKnob (duckingKnob,          "ducking",          "Ducking");
+    setupKnob (overflowKnob,         "overflow",         "Debordement");
 
     delayFilter  = std::make_unique<FilterRangeSlider> (audioProcessor.apvts, "delayHighpass",  "delayLowpass",  "Filtre delay");
     reverbFilter = std::make_unique<FilterRangeSlider> (audioProcessor.apvts, "reverbHighpass", "reverbLowpass", "Filtre reverbe");
@@ -317,9 +318,10 @@ void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
     // Le capot s'ouvre vers le HAUT : la fenetre grandit, la facade ne bouge pas.
     // Hauteurs calees sur le CONTENU reel (bandeau 34 + marges 20 + zone la plus haute 220,
     // le Master avec ses deux rangees + interrupteurs) - sinon les zones sont a moitie vides.
-    // 1140 et non 1060 : le Ducking fait une 3e colonne dans le Master, qui serait a l'etroit
-    // sinon. L'utilisateur voulait de toute facon la facade un peu plus large.
-    setSize (1140, shouldShow ? 200 + 280 : 280);
+    // 1220 : le Master est passe a 4 colonnes (Debordement rejoint la rangee des moddes, les
+    // interrupteurs remontent en haut). A 1140 les cellules tombaient a 83 px et les libelles
+    // se faisaient couper.
+    setSize (1220, shouldShow ? 200 + 280 : 280);
 }
 
 void DigitapeAudioProcessorEditor::drawZone (juce::Graphics& g, juce::Rectangle<int> area,
@@ -474,24 +476,29 @@ void DigitapeAudioProcessorEditor::resized()
         reverbFilter->setBounds (z.removeFromTop (34));
     }
 
-    // Master : deux rangees de 3 colonnes alignees. Ducking est pose a cote de Reactivite :
-    // les deux partagent le meme suiveur d'enveloppe, autant que ca se voie. Les interrupteurs
-    // occupent la 3e cellule du bas plutot qu'une rangee a eux - la facade fait 280 de haut,
-    // il n'y a la place que pour deux rangees de knobs.
+    // Master : deux rangees de 4 colonnes alignees.
+    // La rangee du BAS est celle des knobs "moddes" - Integrite, Debordement, Reactivite : les
+    // trois que le constructeur n'avait pas prevus, ajoutes apres coup par quelqu'un qui a
+    // ouvert la machine. Les poser ensemble sur leur propre rangee est deja un debut de
+    // famille visuelle ; leur donner un vrai look de mod (capuchon depareille, serigraphie a
+    // la main) viendra avec le skin. Rangee du haut = les controles d'origine.
+    // Les interrupteurs occupent la 4e cellule du haut plutot qu'une rangee a eux : la facade
+    // fait 280 de haut, il n'y a la place que pour deux rangees de knobs.
     {
         auto z = zMaster.reduced (10, 0).withTrimmedTop (26).withTrimmedBottom (10);
-        const int w = z.getWidth() / 3;
+        const int w = z.getWidth() / 4;
         auto r1 = z.removeFromTop (76);
         placeKnob (mixKnob,        r1.removeFromLeft (w).reduced (4, 0));
         placeKnob (outputGainKnob, r1.removeFromLeft (w).reduced (4, 0));
         placeKnob (duckingKnob,    r1.removeFromLeft (w).reduced (4, 0));
-        z.removeFromTop (6);
-        auto r2 = z.removeFromTop (76);
-        placeKnob (integrityKnob,  r2.removeFromLeft (w).reduced (4, 0));
-        placeKnob (reactivityKnob, r2.removeFromLeft (w).reduced (4, 0));
-        auto btns = r2.removeFromLeft (w).reduced (4, 12);
+        auto btns = r1.removeFromLeft (w).reduced (4, 12);
         monoButton.setBounds (btns.removeFromTop (24));
         btns.removeFromTop (4);
         safetyButton.setBounds (btns.removeFromTop (24));
+        z.removeFromTop (6);
+        auto r2 = z.removeFromTop (76);
+        placeKnob (integrityKnob,  r2.removeFromLeft (w).reduced (4, 0));
+        placeKnob (overflowKnob,   r2.removeFromLeft (w).reduced (4, 0));
+        placeKnob (reactivityKnob, r2.removeFromLeft (w).reduced (4, 0));
     }
 }

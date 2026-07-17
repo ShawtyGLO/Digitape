@@ -68,6 +68,52 @@ namespace
         return x;
     }
 
+    // Debordement : l'additionneur saturant qui lache. Voir le commentaire du parametre pour
+    // le pourquoi ; ici le comment.
+    //
+    //  * Le plafond DESCEND avec le bouton (0 -> -24 dB) plutot que de pousser le signal
+    //    dedans. Pousser transformerait le bouton en potard de volume deguise - l'erreur
+    //    exacte qui a coute l'auto-gain au preampli. Descendre le plafond dit honnetement
+    //    "la machine manque de nombres", et le niveau ne s'envole pas.
+    //  * Plafond FIXE et non adaptatif : c'est le point. Un plafond qui suivrait l'enveloppe
+    //    mangerait autant les passages doux que les forts ; ici seules les parties fortes le
+    //    depassent - "une bande digitale qui ne mange que les passages forts".
+    //  * La decision clip/dechirure se prend PAR EXCURSION (au franchissement), pas par
+    //    echantillon. Tirer a chaque echantillon ferait alterner les deux au hasard le long
+    //    d'une meme crete : du bruit, pas des dechirures. Un vrai debordement dure aussi
+    //    longtemps que l'accumulateur reste au-dessus - donc un tirage, tenu jusqu'au retour.
+    //  * La sortie est toujours dans [-plafond, +plafond], DONC BORNEE : sans danger dans la
+    //    boucle de reinjection, meme si ca s'entend violemment.
+    //  * Le tirage est le PREMIER alea du plugin. Bitcrush/Decimation/Derive sont tous
+    //    deterministes - c'est ce qui laissait Cycle sans rien a figer. Le generateur est
+    //    donc seme explicitement (cf. prepareToPlay) pour etre reproductible des maintenant :
+    //    Cycle n'aura qu'a capturer/restaurer sa graine.
+    inline float applyOverflow (float x, float amount, OverflowState& st)
+    {
+        if (amount <= 0.0001f)
+            return x;
+
+        const float ceiling = juce::Decibels::decibelsToGain (-24.0f * amount);
+        const bool isOver = std::abs (x) > ceiling;
+
+        // Front montant : la protection tient-elle pour CETTE excursion ? Probabilite en
+        // amount^2 - l'ecretage domine le bas de course (ferme et musical), les dechirures
+        // ne prennent le dessus que vers le haut.
+        if (isOver && ! st.over)
+            st.tear = st.rng.nextFloat() < amount * amount;
+        st.over = isOver;
+
+        if (! isOver)
+            return x;
+
+        if (! st.tear)
+            return juce::jlimit (-ceiling, ceiling, x);
+
+        // Debordement facon complement a deux : la valeur repasse par le bas.
+        const float span = 2.0f * ceiling;
+        return x - span * std::floor ((x + ceiling) / span);
+    }
+
     // Preampli d'entree : seul etage volontairement analogique de la machine (cf. concept).
     // Applique EN ENTREE, donc colore tout le signal (sec, echo, reverbe) - a l'inverse de
     // l'Integrite qui epargne le sec. Chaine, dans l'ordre :
@@ -244,6 +290,25 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::ParameterID { "reverbBrightness", 1 }, "Reverbe brightness",
         juce::NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f,
         juce::AudioParameterFloatAttributes().withLabel ("")));
+
+    // DEBORDEMENT — le knob "modde", celui que le constructeur n'avait pas prevu.
+    // PAS une saturation : une saturation analogique PLIE (genou progressif), un nombre ne plie
+    // pas. Un mot numerique monte jusqu'a sa valeur maximale et soit l'additionneur sature (le
+    // sommet est rase net), soit il DEBORDE et la valeur repasse par le bas - +0.7 ressort a
+    // -0.5, le son ne s'ecrase pas, il se dechire. Aucun circuit analogique ne fait ca.
+    // Ce bouton fait LACHER LA PROTECTION : l'ecretage est ce qu'une machine fait pour EVITER
+    // le debordement (les concepteurs virgule fixe mettaient des additionneurs saturants
+    // expres). En montant, la protection echoue de plus en plus souvent. Ce n'est pas un
+    // morphing arbitraire entre deux courbes, c'est une machine qui tombe en panne - la
+    // definition meme de l'Integrite dans le concept ("une panne, pas un design").
+    // Complementaire du Bitcrush : lui remonte le plancher (le bruit monte en s'eteignant),
+    // celui-ci abaisse le plafond. Les deux referment la meme fenetre par ses deux bouts.
+    // A zero par defaut ; volontairement violent en haut de course (a raboter apres ecoute).
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "overflow", 1 }, "Debordement",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
+            [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
     // DISTANCE : equilibre reflexions primaires / queue diffuse. C'est l'indice qui place
     // l'auditeur dans la piece - beaucoup de primaires = source proche et definie, beaucoup
@@ -525,6 +590,18 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
         for (auto& v : row)
             v = 0.0f;
 
+    // Graines FIXES et distinctes par canal/etage. Fixes : le plugin doit se comporter
+    // identiquement d'une session a l'autre, c'est le prerequis de Cycle (une graine stockee
+    // regenere la meme trajectoire). Distinctes : avec la meme graine partout, les deux
+    // canaux dechireraient exactement en meme temps et le debordement sortirait mono.
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        overflowLoop[ch] = {};
+        overflowBus[ch]  = {};
+        overflowLoop[ch].rng.setSeed (0x0D16A7E0 + ch);
+        overflowBus[ch].rng.setSeed  (0x0D16B05F + ch);
+    }
+
     // Filtres 2 poles : boucle du delay + entree de la reverbe.
     delayHpFilter.setType (juce::dsp::StateVariableTPTFilterType::highpass);
     delayLpFilter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
@@ -580,6 +657,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbBrightnessSmoothed.reset (sampleRate, smoothTime);
     reverbBassDecaySmoothed.reset (sampleRate, smoothTime);
     reverbDistanceSmoothed.reset (sampleRate, smoothTime);
+    overflowSmoothed.reset (sampleRate, smoothTime);
     crossFeedbackSmoothed.reset (sampleRate, smoothTime);
     outputGainSmoothed.reset (sampleRate, smoothTime);
 
@@ -613,6 +691,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbBrightnessSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbBrightness"));
     reverbBassDecaySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbBassDecay"));
     reverbDistanceSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbDistance"));
+    overflowSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("overflow"));
     crossFeedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("crossFeedback"));
     outputGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("outputGain"));
 
@@ -731,6 +810,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     reactivitySmoothed.setTargetValue (*apvts.getRawParameterValue ("reactivity"));
     duckingSmoothed.setTargetValue (*apvts.getRawParameterValue ("ducking"));
     const float duckingBus = *apvts.getRawParameterValue ("ducking");
+    const float overflowBusAmt = *apvts.getRawParameterValue ("overflow");
     delayHighpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("delayHighpass"));
     delayLowpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("delayLowpass"));
     bitcrushAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("bitcrushAmount"));
@@ -813,6 +893,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float saturationEmph = saturationEmphasisSmoothed.getNextValue();
         const float reactivityAmt = reactivitySmoothed.getNextValue();
         const float duckingAmt   = duckingSmoothed.getNextValue();
+        const float overflowAmt  = overflowSmoothed.getNextValue();
         const float syncAmt      = syncAmountSmoothed.getNextValue();
 
         // Reactivite interne : suit l'enveloppe (mono, pic) de l'ENTREE brute et pousse
@@ -919,6 +1000,13 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // la reverbe, pour que l'Intégrité soit un traitement général et pas delay-only.
             toPush = applyIntegrity (toPush, effectiveIntegrity, bitcrushAmt, decimAmount,
                                      holdPhase[ch], heldValue[ch], decimLpState[ch], currentSampleRate);
+
+            // Debordement dans la boucle : chaque repetition redeborde, donc les echos se
+            // dechirent PROGRESSIVEMENT au lieu d'un coup - meme logique d'accumulation que
+            // l'Integrite juste au-dessus. Place AVANT la Securite : les deux ont des roles
+            // opposes (l'une casse volontairement, l'autre protege de l'emballement) et la
+            // Securite doit rester le dernier mot avant la memoire.
+            toPush = applyOverflow (toPush, overflowAmt, overflowLoop[ch]);
 
             if (safetyOn)
                 toPush = softSafetyCeiling (toPush, 1.2f);
@@ -1303,6 +1391,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float effIntegBus = juce::jlimit (0.0f, 1.0f, integrityBus + drvB * reactivityBus);
             reverbContribution = applyIntegrity (reverbContribution, effIntegBus, bitcrushBus, decimBus,
                                                  holdPhaseBus[ch], heldValueBus[ch], decimLpStateBus[ch], currentSampleRate);
+            reverbContribution = applyOverflow (reverbContribution, overflowBusAmt, overflowBus[ch]);
 
             // Sert aussi de source a la Reinjection croisee (capturee APRES le niveau reverbe,
             // pour que Reverb volume reste un levier naturel sur la boucle croisee). La boucle

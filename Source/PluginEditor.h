@@ -113,7 +113,10 @@ private:
     KnobWithLabel saturationKnob;                                              // Preampli
     KnobWithLabel timeKnob, feedbackKnob, wetGainKnob, syncAmountKnob;         // Delay
     KnobWithLabel reverbSizeKnob, reverbDecayKnob, reverbCharacterKnob, reverbMixKnob, reverbModulationKnob; // Reverbe
-    KnobWithLabel mixKnob, outputGainKnob, integrityKnob, reactivityKnob, duckingKnob; // Master
+    // Master. integrityKnob / overflowKnob / reactivityKnob forment la rangee des "moddes"
+    // (cf. resized) : les controles que la machine d'origine n'avait pas.
+    KnobWithLabel mixKnob, outputGainKnob, duckingKnob;
+    KnobWithLabel integrityKnob, overflowKnob, reactivityKnob;
 
     std::unique_ptr<FilterRangeSlider> delayFilter, reverbFilter;
 
