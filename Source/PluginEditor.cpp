@@ -223,6 +223,7 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     setupKnob (reactivityKnob,       "reactivity",       "Reactivite");
     setupKnob (duckingKnob,          "ducking",          "Ducking");
     setupKnob (overflowKnob,         "overflow",         "Debordement");
+    setupKnob (intervalKnob,         "interval",         "Intervalle");
 
     delayFilter  = std::make_unique<FilterRangeSlider> (audioProcessor.apvts, "delayHighpass",  "delayLowpass",  "Filtre delay");
     reverbFilter = std::make_unique<FilterRangeSlider> (audioProcessor.apvts, "reverbHighpass", "reverbLowpass", "Filtre reverbe");
@@ -500,5 +501,6 @@ void DigitapeAudioProcessorEditor::resized()
         placeKnob (integrityKnob,  r2.removeFromLeft (w).reduced (4, 0));
         placeKnob (overflowKnob,   r2.removeFromLeft (w).reduced (4, 0));
         placeKnob (reactivityKnob, r2.removeFromLeft (w).reduced (4, 0));
+        placeKnob (intervalKnob,   r2.removeFromLeft (w).reduced (4, 0));
     }
 }

@@ -104,6 +104,18 @@ private:
 
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLine { 192000 };
 
+    // INTERVALLE : transpositeur pose sur le chemin de reinjection du Moteur temps.
+    // Methode des H3000/Publison (notre lignee) : deux tetes de lecture qui glissent a vitesse
+    // constante dans une fenetre et se relaient en fondu. On ne peut pas y couper - relire plus
+    // vite (varispeed) transposerait sans artefact mais RACCOURCIRAIT le son a chaque tour, et
+    // dans une boucle il ne resterait que des clics au bout de quelques passages. Les deux
+    // tetes sont le seul moyen de transposer SANS raccourcir. Le prix est l'artefact au relais :
+    // flottement sur du tenu, doublement sur les transitoires. Assume - c'est le son de ces
+    // machines, et l'alternative (vocodeur de phase) coute cher et sonne "moderne".
+    juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> pitchShiftLine { 24000 };
+    float pitchPhase[2] { 0.0f, 0.0f };
+    juce::SmoothedValue<float> intervalSmoothed;
+
     // Reseau a retards rebouclés maison, remplace juce::dsp::Reverb. Pre-diffusion :
     // 4 allpass Schroeder en serie. Tank façon Lexicon/EMT/Dattorro (lignee des refs
     // hardware du concept) : boucle croisee a 2 bras en figure-8, CHAQUE bras avec DEUX

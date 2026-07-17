@@ -68,6 +68,24 @@ namespace
         return x;
     }
 
+    // Magnetisme de l'Intervalle vers la grille chromatique. Le concept demande "un magnetisme
+    // vers les intervalles justes" et veut que l'Intervalle parle le MEME LANGAGE que la Sync :
+    // une accroche continue, pas une bascule. Sync aimante le TEMPS vers une grille rythmique,
+    // l'Intervalle aimante la HAUTEUR vers une grille chromatique - le meme geste sur deux axes.
+    // Ce n'est donc pas un snap : la courbe est continue et monotone, on peut toujours se poser
+    // entre deux demi-tons en insistant, c'est juste que l'espace se resserre autour d'eux.
+    // (Un simple "arrondi vers le plus proche, attenue" ferait un SAUT au milieu de l'intervalle
+    // - a 7.49 on tomberait a 7.2 et a 7.51 a 7.8. D'ou la mise en forme de la fraction.)
+    inline float magnetizeInterval (float semitones, float strength)
+    {
+        const float base = std::floor (semitones);
+        const float frac = semitones - base;
+        const float u = frac * 2.0f - 1.0f;                    // -1..1, 0 = milieu (le repulseur)
+        const float p = 1.0f / (1.0f + strength * 3.0f);       // <1 -> pousse vers +-1
+        const float shaped = (u < 0.0f ? -1.0f : 1.0f) * std::pow (std::abs (u), p);
+        return base + (shaped + 1.0f) * 0.5f;
+    }
+
     // Debordement : l'additionneur saturant qui lache. Voir le commentaire du parametre pour
     // le pourquoi ; ici le comment.
     //
@@ -324,6 +342,30 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::ParameterID { "reverbBrightness", 1 }, "Reverbe brightness",
         juce::NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f,
         juce::AudioParameterFloatAttributes().withLabel ("")));
+
+    // INTERVALLE — reinjection accordee (shimmer). Heritage Eventide H3000 / Publison.
+    // Un transpositeur pose sur le chemin de REINJECTION du Moteur temps : chaque tour de
+    // boucle revient transpose. C'est ce qui transforme le "pad psychedelique" de la
+    // Reinjection croisee en vraie montee.
+    // CHEMIN PARTAGE (promesse du concept, tenue) : la boucle croisee rentre elle aussi dans
+    // la memoire du delay, donc UN SEUL transpositeur attrape les deux - les echos montent, et
+    // la traine de reverbe qui revient monte aussi. Pas deux modules a ecrire.
+    // Et il herite GRATUITEMENT de toute l'architecture temporelle : il transpose une fois par
+    // tour, or la periode du tour est effectiveTimeMs - deja le resultat du melange que la Sync
+    // opere entre temps libre et division choisie. Donc Sync a 0% = montee libre au rythme du
+    // bouton Temps ; Sync a 100% = chaque marche de la montee tombe exactement sur la division.
+    // Zero bouton ajoute pour ca : c'etait deja construit.
+    // Consequence assumee (v1, decidee avec l'utilisateur) : la periode de montee EST le temps
+    // de delay. Un echo long donne donc toujours des marches, jamais une nappe fluide. Le
+    // decoupler demanderait au shimmer sa propre boucle et son propre reglage de vitesse - a
+    // faire seulement si ce manque se fait sentir a l'usage.
+    // 0 = neutre (transpositeur court-circuite, pas juste inaudible : a ratio 1 les deux tetes
+    // liraient a des positions fixes differentes et feraient un filtre en peigne).
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "interval", 1 }, "Intervalle",
+        juce::NormalisableRange<float> (-12.0f, 12.0f, 0.01f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("dt").withStringFromValueFunction (
+            [] (float v, int) { return (v > 0.0f ? "+" : "") + juce::String (v, 1); })));
 
     // DEBORDEMENT — le knob "modde", celui que le constructeur n'avait pas prevu.
     // PAS une saturation : une saturation analogique PLIE (genou progressif), un nombre ne plie
@@ -653,6 +695,14 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     preDelayLine.prepare (spec);
     preDelayLine.reset();
 
+    // Fenetre du transpositeur : 80 ms. Compromis classique - plus court, le relais des tetes
+    // revient trop souvent et le flottement devient un trémolo ; plus long, la latence de
+    // reponse du shifter s'entend sur les transitoires.
+    pitchShiftLine.setMaximumDelayInSamples ((int) (0.1 * sampleRate));
+    pitchShiftLine.prepare (spec);
+    pitchShiftLine.reset();
+    pitchPhase[0] = pitchPhase[1] = 0.0f;
+
     // 0.15 s : la prise la plus tardive (53.7 ms) etiree par la Taille max (1.8x) fait ~97 ms.
     earlyDelayLine.setMaximumDelayInSamples ((int) (0.15 * sampleRate));
     earlyDelayLine.prepare (spec);
@@ -694,6 +744,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbBassDecaySmoothed.reset (sampleRate, smoothTime);
     reverbDistanceSmoothed.reset (sampleRate, smoothTime);
     overflowSmoothed.reset (sampleRate, smoothTime);
+    intervalSmoothed.reset (sampleRate, smoothTime);
     crossFeedbackSmoothed.reset (sampleRate, smoothTime);
     outputGainSmoothed.reset (sampleRate, smoothTime);
 
@@ -728,6 +779,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbBassDecaySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbBassDecay"));
     reverbDistanceSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbDistance"));
     overflowSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("overflow"));
+    intervalSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("interval"));
     crossFeedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("crossFeedback"));
     outputGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("outputGain"));
 
@@ -877,6 +929,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     crossFeedbackSmoothed.setTargetValue (*apvts.getRawParameterValue ("crossFeedback"));
     const float crossFeedAmt = crossFeedbackSmoothed.getNextValue();
     const float crossFeedDelaySamples = 0.02f * (float) currentSampleRate;
+    const float pitchWindowSamples = 0.08f * (float) currentSampleRate;
     outputGainSmoothed.setTargetValue (*apvts.getRawParameterValue ("outputGain"));
 
     // Sync tempo : calculee une fois par bloc (le tempo hote ne bouge pas a l'echantillon
@@ -930,6 +983,13 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float reactivityAmt = reactivitySmoothed.getNextValue();
         const float duckingAmt   = duckingSmoothed.getNextValue();
         const float overflowAmt  = overflowSmoothed.getNextValue();
+
+        // Intervalle : magnetise vers la grille chromatique, puis converti en rapport de
+        // vitesse de lecture. Le magnetisme est cable a 0.7 pour la v1 (le concept le voulait
+        // "optionnel" : ce serait un knob de plus, on verra si le besoin se fait sentir).
+        const float intervalSemis = magnetizeInterval (intervalSmoothed.getNextValue(), 0.7f);
+        const float intervalRatio = std::pow (2.0f, intervalSemis / 12.0f);
+        const bool  intervalActive = std::abs (intervalSemis) > 0.01f;
         const float syncAmt      = syncAmountSmoothed.getNextValue();
 
         // Reactivite interne : suit l'enveloppe (mono, pic) de l'ENTREE brute et pousse
@@ -1037,7 +1097,32 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             inputSample = applyOverflow (inputSample, overflowAmt, overflowInput[ch]);
 
             const float delayedSample = delayLine.popSample (ch, channelDelaySamples[ch]);
-            float toPush = inputSample + delayedSample * feedbackAmt;
+
+            // INTERVALLE : transpose ce qui repart dans la boucle. Deux tetes glissant a
+            // vitesse constante, relayees en fondu a puissance constante (elles lisent la meme
+            // fenetre a des positions decalees d'une demi-periode, donc quand l'une approche du
+            // point de raccord l'autre est au milieu et domine).
+            //   phase avance de (1 - ratio)/fenetre : pour monter (ratio > 1) il faut lire plus
+            //   vite, donc rattraper l'ecriture, donc DIMINUER le retard - d'ou le signe.
+            // On lit/pousse TOUJOURS, meme a Intervalle nul, pour que la fenetre reste fraiche :
+            // sinon le premier geste sur le bouton ferait ressortir du vieux son.
+            pitchPhase[ch] += (1.0f - intervalRatio) / pitchWindowSamples;
+            while (pitchPhase[ch] >= 1.0f) pitchPhase[ch] -= 1.0f;
+            while (pitchPhase[ch] <  0.0f) pitchPhase[ch] += 1.0f;
+
+            float phaseB = pitchPhase[ch] + 0.5f;
+            if (phaseB >= 1.0f)
+                phaseB -= 1.0f;
+
+            const float headA = pitchShiftLine.popSample (ch, juce::jmax (1.0f, pitchPhase[ch] * pitchWindowSamples), false);
+            const float headB = pitchShiftLine.popSample (ch, juce::jmax (1.0f, phaseB * pitchWindowSamples), false);
+            pitchShiftLine.popSample (ch, 1.0f, true);          // la seule lecture qui avance le pointeur
+            pitchShiftLine.pushSample (ch, delayedSample);
+
+            const float shifted = headA * std::sin (juce::MathConstants<float>::pi * pitchPhase[ch])
+                                + headB * std::sin (juce::MathConstants<float>::pi * phaseB);
+
+            float toPush = inputSample + (intervalActive ? shifted : delayedSample) * feedbackAmt;
 
             // Reinjection croisee : la traine humide de la Reverbe (avec ~20ms de retard
             // fixe, cf. commentaire du membre) revient se faire attraper par le Moteur
