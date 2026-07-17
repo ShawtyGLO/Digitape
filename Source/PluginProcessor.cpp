@@ -1122,7 +1122,15 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float shifted = headA * std::sin (juce::MathConstants<float>::pi * pitchPhase[ch])
                                 + headB * std::sin (juce::MathConstants<float>::pi * phaseB);
 
-            float toPush = inputSample + (intervalActive ? shifted : delayedSample) * feedbackAmt;
+            // Sortie de boucle = le signal (eventuellement transpose). C'est LUI qu'on entend
+            // ET lui qu'on reinjecte - les deux doivent etre le meme, sinon le premier echo
+            // (le plus fort) resterait a la hauteur d'origine et la montee ne se construirait
+            // qu'a travers la reinjection : inaudible sans Reinjection poussee a fond. En
+            // tapant loopOut pour la sortie, l'echo est transpose des la 1re repetition, et la
+            // reinjection le retranspose a chaque tour -> vraie montee facon shimmer.
+            const float loopOut = intervalActive ? shifted : delayedSample;
+
+            float toPush = inputSample + loopOut * feedbackAmt;
 
             // Reinjection croisee : la traine humide de la Reverbe (avec ~20ms de retard
             // fixe, cf. commentaire du membre) revient se faire attraper par le Moteur
@@ -1160,7 +1168,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // Echo (repetitions du delay) a son volume (Echo volume). Sec+echo alimente le
             // moteur de reverbe (dryDelayBuf, non pondere par le Mix global). La sortie
             // non-reverbe est deja dosee par le Mix global (sec*(1-Mix) + echo*Mix).
-            const float delayWet = delayedSample * wetGainLin;
+            const float delayWet = loopOut * wetGainLin;
 
             // Le ducking ne touche QUE ce qu'on entend, jamais ce qui alimente la reverbe :
             // dryDelay reste intact, sinon on affamerait le moteur au lieu de baisser sa
