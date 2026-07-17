@@ -975,7 +975,13 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         const float timeMs      = timeSmoothed.getNextValue();
         const float feedbackAmt = feedbackSmoothed.getNextValue();
         const float globalMix   = mixSmoothed.getNextValue();   // Dry/Wet GLOBAL du plugin
-        globalMixBuf.setSample (0, n, globalMix);
+        // Fondu a PUISSANCE CONSTANTE (loi cos/sin) et non lineaire. Le sec et l'humide sont
+        // decorreles, donc un fondu lineaire (sec*(1-Mix) + humide*Mix) creuse la puissance de
+        // ~3 dB a 50% - d'ou le volume plus bas au centre qu'aux extremes. En cos/sin, a 50%
+        // les deux gains valent 0.707 et les puissances se somment a 1 : niveau constant.
+        const float dryMixGain = std::cos (globalMix * juce::MathConstants<float>::halfPi);
+        const float wetMixGain = std::sin (globalMix * juce::MathConstants<float>::halfPi);
+        globalMixBuf.setSample (0, n, wetMixGain);              // l'etage reverbe lit ce gain humide
         const float rateHz      = driftRateSmoothed.getNextValue();
         const float depthAmt    = driftDepthSmoothed.getNextValue();
         const float widthAmt    = widthSmoothed.getNextValue();
@@ -1015,9 +1021,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
         // Ducking : le meme suiveur, mais SANS seuil (contrairement a la Reactivite) - on veut
         // que les effets reculent proportionnellement des que la source joue, pas seulement sur
-        // les pics. A fond, une source forte (env ~0.7) fait reculer l'humide d'environ 10 dB,
-        // et la traine revient dans les silences.
-        const float duckGain = juce::jlimit (0.0f, 1.0f, 1.0f - reactEnv * duckingAmt);
+        // les pics. Le facteur 3.0 (au lieu de 1.0) rend le ducking BEAUCOUP plus fort : a fond,
+        // une source moderee (env ~0.33) suffit a effacer l'humide, et la traine revient dans
+        // les silences. C'est le comportement classique "l'effet disparait quand ca joue".
+        constexpr float duckDepth = 3.0f;
+        const float duckGain = juce::jlimit (0.0f, 1.0f, 1.0f - reactEnv * duckingAmt * duckDepth);
 
         const float effectiveTimeMs = timeMs * (1.0f - syncAmt) + syncedTimeMs * syncAmt;
 
@@ -1184,7 +1192,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 dryDelay = softSafetyCeiling (dryDelay, 1.2f);
             dryDelayBuf.setSample (ch, n, dryDelay);
 
-            float directOut = inputSample * (1.0f - globalMix) + delayWet * duckGain * globalMix;
+            float directOut = inputSample * dryMixGain + delayWet * duckGain * wetMixGain;
             if (safetyOn)
                 directOut = softSafetyCeiling (directOut, 1.2f);
             directOutBuf.setSample (ch, n, directOut);
@@ -1578,7 +1586,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // Ducking applique ICI et pas plus tot : la Reinjection croisee (capturee juste
             // au-dessus) est un circuit interne et garde la reverbe pleine, sinon la boucle
             // croisee pomperait au rythme de la source. Le ducking est un dosage de SORTIE.
-            const float duckB = juce::jlimit (0.0f, 1.0f, 1.0f - reactEnvBuf.getSample (0, n) * duckingBus);
+            const float duckB = juce::jlimit (0.0f, 1.0f, 1.0f - reactEnvBuf.getSample (0, n) * duckingBus * 3.0f);
             const float gm = globalMixBuf.getSample (0, n);
             float mixed = directData[n] + reverbContribution * duckB * gm;
             if (safetyOn)
