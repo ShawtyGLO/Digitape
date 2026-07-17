@@ -21,8 +21,12 @@ struct PreampState
 // le reproduire a l'identique a partir d'une simple graine.
 struct OverflowState
 {
+    // Comment la protection se comporte pour l'excursion en cours. Elle lache en DEUX TEMPS :
+    // elle plie d'abord (continu, donc sans clic), elle ne casse qu'en haut de course.
+    enum Mode { hold, bend, snap };
+
     bool over = false;          // l'echantillon precedent depassait-il le plafond ?
-    bool tear = false;          // l'excursion en cours a-t-elle ete tiree comme dechirure ?
+    Mode mode = hold;           // tire une fois par excursion, tenu jusqu'au retour
     juce::Random rng;
 };
 

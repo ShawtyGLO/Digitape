@@ -96,20 +96,54 @@ namespace
         const float ceiling = juce::Decibels::decibelsToGain (-24.0f * amount);
         const bool isOver = std::abs (x) > ceiling;
 
-        // Front montant : la protection tient-elle pour CETTE excursion ? Probabilite en
-        // amount^2 - l'ecretage domine le bas de course (ferme et musical), les dechirures
-        // ne prennent le dessus que vers le haut.
+        // Front montant : la protection tient-elle pour CETTE excursion, et si non, comment
+        // lache-t-elle ? Elle lache EN DEUX TEMPS - d'abord elle PLIE, et seulement en haut
+        // de course elle CASSE :
+        //   * Probabilite d'echec = amount^2 (dosage valide a l'oreille, on n'y touche pas).
+        //   * Une fois qu'elle echoue, elle CASSE avec une probabilite qui ne demarre qu'a
+        //     70% de course. En dessous, elle ne fait que plier.
+        // Pourquoi : la CASSURE est une discontinuite (+plafond -> -plafond d'un echantillon
+        // a l'autre), et une discontinuite EST un clic - mathematiquement, pas par accident.
+        // Aucun lissage ne l'enleverait sans supprimer le mecanisme. Le PLI, lui, est continu
+        // par construction (a la frontiere la sortie vaut exactement le plafond des deux
+        // cotes) : le sommet se fait detruire pareil, harmoniques riches pareil, mais sans
+        // aucune marche - donc sans clic.
+        // Et le pli reste tout aussi impossible en analogique : il est NON MONOTONE (plus
+        // d'entree donne MOINS de sortie), or un circuit de saturation tend toujours vers une
+        // limite sans jamais redescendre.
         if (isOver && ! st.over)
-            st.tear = st.rng.nextFloat() < amount * amount;
+        {
+            if (st.rng.nextFloat() < amount * amount)
+            {
+                const float snapProb = juce::jmax (0.0f, (amount - 0.7f) / 0.3f);
+                st.mode = st.rng.nextFloat() < snapProb ? OverflowState::snap
+                                                       : OverflowState::bend;
+            }
+            else
+            {
+                st.mode = OverflowState::hold;
+            }
+        }
         st.over = isOver;
 
-        if (! isOver)
-            return x;
+        if (! isOver || st.mode == OverflowState::hold)
+            return isOver ? juce::jlimit (-ceiling, ceiling, x) : x;
 
-        if (! st.tear)
-            return juce::jlimit (-ceiling, ceiling, x);
+        if (st.mode == OverflowState::bend)
+        {
+            // Repliement triangulaire : le sommet se reflechit sous le plafond. Periode 4*c
+            // pour que les replis successifs s'enchainent proprement au lieu de partir a
+            // l'infini quand le signal depasse largement (a 3*c, on ressort a -c).
+            const float span = 4.0f * ceiling;
+            float f = x - span * std::floor (x / span + 0.5f);
+            if (f > ceiling)
+                f = 2.0f * ceiling - f;
+            else if (f < -ceiling)
+                f = -2.0f * ceiling - f;
+            return f;
+        }
 
-        // Debordement facon complement a deux : la valeur repasse par le bas.
+        // Cassure : debordement facon complement a deux, la valeur repasse par le bas.
         const float span = 2.0f * ceiling;
         return x - span * std::floor ((x + ceiling) / span);
     }
