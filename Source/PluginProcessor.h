@@ -92,8 +92,11 @@ private:
     // Debordement : meme decoupage en deux etages que l'Integrite (boucle echo + bus reverbe),
     // etats separes. Dans la boucle, chaque repetition redeborde -> les echos se dechirent
     // PROGRESSIVEMENT, comme la bande s'abime a chaque passage.
+    // overflowInput = l'etage d'ENTREE (apres le preampli, avant la repartition) : le seul qui
+    // touche aussi le sec, cf. le commentaire au point d'application. Les deux autres suivent
+    // le decoupage de l'Integrite.
     juce::SmoothedValue<float> overflowSmoothed;
-    OverflowState overflowLoop[2], overflowBus[2];
+    OverflowState overflowInput[2], overflowLoop[2], overflowBus[2];
 
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Lagrange3rd> delayLine { 192000 };
 

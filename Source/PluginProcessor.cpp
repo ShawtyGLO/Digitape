@@ -596,10 +596,12 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     // canaux dechireraient exactement en meme temps et le debordement sortirait mono.
     for (int ch = 0; ch < 2; ++ch)
     {
-        overflowLoop[ch] = {};
-        overflowBus[ch]  = {};
-        overflowLoop[ch].rng.setSeed (0x0D16A7E0 + ch);
-        overflowBus[ch].rng.setSeed  (0x0D16B05F + ch);
+        overflowInput[ch] = {};
+        overflowLoop[ch]  = {};
+        overflowBus[ch]   = {};
+        overflowInput[ch].rng.setSeed (0x0D16E47A + ch);
+        overflowLoop[ch].rng.setSeed  (0x0D16A7E0 + ch);
+        overflowBus[ch].rng.setSeed   (0x0D16B05F + ch);
     }
 
     // Filtres 2 poles : boucle du delay + entree de la reverbe.
@@ -974,8 +976,31 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             auto* data = buffer.getWritePointer (ch);
             // Preampli d'entree : sature le signal des l'entree, avant de le repartir vers
             // le sec, l'echo et la reverbe - c'est l'etage analogique qui colore tout.
-            const float inputSample = preampProcess (data[n], saturationAmt, saturationType,
-                                                     saturationEmph, preampState[ch], currentSampleRate);
+            float inputSample = preampProcess (data[n], saturationAmt, saturationType,
+                                               saturationEmph, preampState[ch], currentSampleRate);
+
+            // Debordement d'ENTREE, juste apres le preampli et AVANT la repartition : il touche
+            // donc le sec, l'echo et la reverbe. C'est le seul etage, avec le preampli, a
+            // colorer tout - et c'est volontaire : les deux sont au meme endroit parce qu'ils
+            // disent la meme chose a deux niveaux (le nerf analogique qui sature, puis les
+            // nombres qui manquent).
+            //
+            // Il N'obeit PAS a la doctrine "le sec reste propre" de l'Integrite, et ce n'est
+            // pas une incoherence :
+            //   - l'Integrite degrade la MEMOIRE (ce qui est stocke puis relu). La metaphore
+            //     bande tient : l'enregistrement s'abime, pas le signal live. Epargner le sec
+            //     est juste.
+            //   - le Debordement est une panne d'ARITHMETIQUE. La machine manque de nombres,
+            //     ca n'arrive pas a la memoire mais a tout ce qui traverse le circuit, live
+            //     compris. Surcharge l'electronique d'entree d'une vraie machine : tout ce qui
+            //     est en aval distord, y compris ce que tu entends en direct.
+            //
+            // Sans cet etage, le comportement etait a l'envers de l'intuition : on jouait fort,
+            // le sec restait intact, et c'est un echo PLUS FAIBLE qui se dechirait plus tard.
+            // La panne ne suivait pas le geste - d'ou un effet ressenti comme mecanique.
+            // ⚠️ Consequence assumee : a Mix 0 (sec seul), Debordement pousse abime quand meme
+            // la source. C'est un bouton "modde", il n'est pas cense etre sans danger.
+            inputSample = applyOverflow (inputSample, overflowAmt, overflowInput[ch]);
 
             const float delayedSample = delayLine.popSample (ch, channelDelaySamples[ch]);
             float toPush = inputSample + delayedSample * feedbackAmt;
