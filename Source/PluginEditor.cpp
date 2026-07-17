@@ -265,7 +265,7 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     // pas de l'encre sombre comme sur la facade creme.
     for (auto* k : { &driftRateKnob, &driftDepthKnob, &driftShapeKnob, &widthKnob,
                      &bitcrushAmountKnob, &decimationAmountKnob, &saturationEmphasisKnob,
-                     &reverbPreDelayKnob, &reverbTransientKnob, &reverbBrightnessKnob,
+                     &reverbCharacterKnob, &reverbTransientKnob, &reverbBrightnessKnob,
                      &reverbBassDecayKnob, &reverbDistanceKnob, &crossFeedbackKnob })
         k->label.setColour (juce::Label::textColourId, Skin::silk);
 
@@ -307,14 +307,14 @@ void DigitapeAudioProcessorEditor::setShowingAdvanced (bool shouldShow)
 
     for (auto* k : { &driftRateKnob, &driftDepthKnob, &driftShapeKnob, &widthKnob,
                      &bitcrushAmountKnob, &decimationAmountKnob, &saturationEmphasisKnob,
-                     &reverbPreDelayKnob, &reverbTransientKnob, &reverbBrightnessKnob,
+                     &reverbCharacterKnob, &reverbTransientKnob, &reverbBrightnessKnob,
                      &reverbBassDecayKnob, &reverbDistanceKnob, &crossFeedbackKnob })
     {
         k->slider.setVisible (shouldShow);
         k->label.setVisible (shouldShow);
     }
-    syncNoteCombo.setVisible (shouldShow);
-    syncFlavorCombo.setVisible (shouldShow);
+    // Les selecteurs Sync sont desormais en FACADE (zone Delay) : toujours visibles, ils ne
+    // suivent plus l'ouverture du capot.
 
     // Le capot s'ouvre vers le HAUT : la fenetre grandit, la facade ne bouge pas.
     // Hauteurs calees sur le CONTENU reel (bandeau 34 + marges 20 + zone la plus haute 220,
@@ -399,8 +399,11 @@ void DigitapeAudioProcessorEditor::resized()
     if (showingAdvanced)
     {
         auto hood = hoodArea.reduced (16, 0).withTrimmedTop (26).withTrimmedBottom (12);
-        // 8 colonnes : la rangee 2 (preampli + reverbe + reinjection) en compte exactement 8 ;
-        // la rangee 1 en garde 6 et laisse deux cellules libres a droite.
+        // 8 colonnes. Rangee 1 = reglages fins d'USINE (derive, largeur, preampli, reverbe).
+        // Rangee 2 : la fin des reglages usine, puis a droite le groupe MOD (Bitcrush,
+        // Decimation, Crossfeed) - deja rassembles ici pour preparer le futur traitement
+        // visuel "cote mod" (knobs a vis depareilles, cf. direction UI). Pre-delai est parti
+        // en facade ; Caractere l'a remplace ici ; les selecteurs Sync sont partis en facade.
         const int cellW = hood.getWidth() / 8;
 
         auto row1 = hood.removeFromTop (74);
@@ -408,23 +411,20 @@ void DigitapeAudioProcessorEditor::resized()
         placeKnob (driftDepthKnob,       row1.removeFromLeft (cellW).reduced (6, 0));
         placeKnob (driftShapeKnob,       row1.removeFromLeft (cellW).reduced (6, 0));
         placeKnob (widthKnob,            row1.removeFromLeft (cellW).reduced (6, 0));
-        placeKnob (bitcrushAmountKnob,   row1.removeFromLeft (cellW).reduced (6, 0));
-        placeKnob (decimationAmountKnob, row1.removeFromLeft (cellW).reduced (6, 0));
+        placeKnob (saturationEmphasisKnob, row1.removeFromLeft (cellW).reduced (6, 0));
+        placeKnob (reverbCharacterKnob,  row1.removeFromLeft (cellW).reduced (6, 0));
+        placeKnob (reverbTransientKnob,  row1.removeFromLeft (cellW).reduced (6, 0));
+        placeKnob (reverbBrightnessKnob, row1.removeFromLeft (cellW).reduced (6, 0));
 
         hood.removeFromTop (8);
         auto row2 = hood.removeFromTop (74);
-        placeKnob (saturationEmphasisKnob, row2.removeFromLeft (cellW).reduced (6, 0));
-        placeKnob (reverbPreDelayKnob,     row2.removeFromLeft (cellW).reduced (6, 0));
-        placeKnob (reverbTransientKnob,    row2.removeFromLeft (cellW).reduced (6, 0));
-        placeKnob (reverbBrightnessKnob,   row2.removeFromLeft (cellW).reduced (6, 0));
         placeKnob (reverbBassDecayKnob,    row2.removeFromLeft (cellW).reduced (6, 0));
         placeKnob (reverbDistanceKnob,     row2.removeFromLeft (cellW).reduced (6, 0));
-        placeKnob (crossFeedbackKnob,      row2.removeFromLeft (cellW).reduced (6, 0));
-
-        auto combos = row2.removeFromLeft (cellW).reduced (6, 8);
-        syncNoteCombo.setBounds (combos.removeFromTop (24));
-        combos.removeFromTop (5);
-        syncFlavorCombo.setBounds (combos.removeFromTop (24));
+        row2.removeFromLeft (cellW);   // colonne vide : separe l'usine du groupe mod a droite
+        row2.removeFromLeft (cellW);
+        placeKnob (bitcrushAmountKnob,   row2.removeFromLeft (cellW).reduced (6, 0));
+        placeKnob (decimationAmountKnob, row2.removeFromLeft (cellW).reduced (6, 0));
+        placeKnob (crossFeedbackKnob,    row2.removeFromLeft (cellW).reduced (6, 0));
     }
 
     // ---- Facade ----
@@ -450,7 +450,10 @@ void DigitapeAudioProcessorEditor::resized()
         saturationTypeCombo.setBounds (z.removeFromTop (24));
     }
 
-    // Delay : 4 knobs + le filtre en un seul controle.
+    // Delay : 4 knobs + le filtre + les selecteurs Sync (division + saveur). Ces deux-la
+    // remontent du capot en facade a la demande de l'utilisateur : la division rythmique est
+    // un reglage de jeu, pas un reglage fin qu'on oublie. (Ils migreront vers l'ecran quand
+    // il existera - selection de la zone Delay -> menu de parametres masques autrement.)
     {
         auto z = zDelay.reduced (10, 0).withTrimmedTop (26).withTrimmedBottom (10);
         auto knobs = z.removeFromTop (76);
@@ -461,16 +464,24 @@ void DigitapeAudioProcessorEditor::resized()
         placeKnob (syncAmountKnob, knobs.removeFromLeft (w).reduced (4, 0));
         z.removeFromTop (10);
         delayFilter->setBounds (z.removeFromTop (34));
+        z.removeFromTop (8);
+        auto sync = z.removeFromTop (24);
+        const int sw = sync.getWidth() / 2;
+        syncNoteCombo.setBounds   (sync.removeFromLeft (sw).reduced (2, 0));
+        syncFlavorCombo.setBounds (sync.reduced (2, 0));
     }
 
-    // Reverbe : 5 knobs (Taille et Longueur sont deux choses distinctes) + le filtre.
+    // Reverbe : 5 knobs + le filtre. Ordre voulu par l'utilisateur : Taille, PRE-DELAI,
+    // Longueur, Modulation, Volume. Le Pre-delai remplace le Caractere en facade - le
+    // Caractere se regle une fois puis s'oublie, alors que le pre-delai est un reglage
+    // primordial d'une reverbe pro qu'on ajuste par source. Caractere part donc au capot.
     {
         auto z = zReverb.reduced (10, 0).withTrimmedTop (26).withTrimmedBottom (10);
         auto knobs = z.removeFromTop (76);
         const int w = knobs.getWidth() / 5;
         placeKnob (reverbSizeKnob,       knobs.removeFromLeft (w).reduced (3, 0));
+        placeKnob (reverbPreDelayKnob,   knobs.removeFromLeft (w).reduced (3, 0));
         placeKnob (reverbDecayKnob,      knobs.removeFromLeft (w).reduced (3, 0));
-        placeKnob (reverbCharacterKnob,  knobs.removeFromLeft (w).reduced (3, 0));
         placeKnob (reverbModulationKnob, knobs.removeFromLeft (w).reduced (3, 0));
         placeKnob (reverbMixKnob,        knobs.removeFromLeft (w).reduced (3, 0));
         z.removeFromTop (10);
