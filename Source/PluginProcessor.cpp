@@ -898,6 +898,12 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     reactivitySmoothed.setTargetValue (*apvts.getRawParameterValue ("reactivity"));
     duckingSmoothed.setTargetValue (*apvts.getRawParameterValue ("ducking"));
     const float duckingBus = *apvts.getRawParameterValue ("ducking");
+    // Ces deux-la manquaient : sans setTargetValue par bloc, la valeur lissee restait figee a
+    // celle du chargement (0) et le knob ne faisait RIEN une fois lu par getNextValue(). Pour
+    // l'Intervalle c'etait total (aucune autre lecture) ; pour le Debordement, seul le bus
+    // (raw param ci-dessous) repondait, les etages entree+boucle etaient geles a 0.
+    overflowSmoothed.setTargetValue (*apvts.getRawParameterValue ("overflow"));
+    intervalSmoothed.setTargetValue (*apvts.getRawParameterValue ("interval"));
     const float overflowBusAmt = *apvts.getRawParameterValue ("overflow");
     delayHighpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("delayHighpass"));
     delayLowpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("delayLowpass"));
