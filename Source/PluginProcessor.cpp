@@ -948,15 +948,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     syncAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("syncAmount"));
     reverbDecaySmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbDecay"));
 
-    // Taille : smoother manuel Elastique. Le glissement est per-bloc (le tank recalcule ses
-    // longueurs une fois par bloc), donc on avance le coefficient au prorata du numSamples pour
-    // que la constante de temps reelle (300 ms en Elastique) ne depende pas de la taille de
-    // bloc de l'hote. Formule : 1 - (1-coeffPerSample)^numSamples.
-    {
-        const float coeffBlock = 1.0f - std::pow (1.0f - reverbSizeElasticCoeff, (float) numSamples);
-        const float target     = *apvts.getRawParameterValue ("reverbSize");
-        reverbSizeElasticState += (target - reverbSizeElasticState) * coeffBlock;
-    }
+    // Taille : le lissage Elastique se fait desormais PER-SAMPLE, directement dans la boucle
+    // du tank (voir plus bas). Cela fixe le grésillement qu'on entendait en bougeant Taille -
+    // les positions de lecture changeaient d'un coup par bloc, produisant des sauts audibles.
     reverbCharacterSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbCharacter"));
     reverbMixSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbMix"));
     reverbModulationSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbModulation"));
@@ -1260,7 +1254,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // --- Reverbe : reseau a retards rebouclés maison (FDN, cf. section tank plus bas) ---
     // Alimentee par le sec+echo (dryDelayBuf). Taille pilote la decroissance, Caractere
     // l'amortissement par ligne.
-    const float reverbSizeVal   = reverbSizeElasticState;
+    // TAILLE : cible lue une fois, lissage per-sample dans la boucle du tank (voir plus bas).
+    // Motif : les positions de lecture du tank dependent de la Taille ; les mettre a jour par
+    // bloc creee des sauts de plusieurs samples aux frontieres = grésillement audible. Per-
+    // sample, les sauts deviennent des glissements sub-samples = varispeed continu, propre.
+    const float reverbSizeRawTarget = *apvts.getRawParameterValue ("reverbSize");
     const float reverbDecayVal  = reverbDecaySmoothed.getNextValue();
     const float reverbCharVal   = reverbCharacterSmoothed.getNextValue();
     const float reverbMixVal    = reverbMixSmoothed.getNextValue();
@@ -1270,13 +1268,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float lowpassHz       = reverbLowpassSmoothed.getNextValue();
     const float brightnessVal   = reverbBrightnessSmoothed.getNextValue();
 
-    // TAILLE : etire vraiment les lignes du tank (les dimensions de la piece). Avant, les
-    // longueurs etaient figees et "Taille" ne faisait que la decroissance - d'ou l'impression
-    // qu'il manquait un controle de longueur.
-    const float fdnSizeFactor = juce::jmap (reverbSizeVal, 0.0f, 1.0f, 0.5f, 1.8f);
-
     // LONGUEUR : la decroissance (RT60), desormais son propre parametre, independant de la
     // taille. Le gain de chaque bras en decoule, compte tenu de la longueur reelle du tour.
+    // Reste per-bloc : ne cause pas de saut de position, un petit pas de gain ne click pas.
     const float fdnDecaySeconds = juce::jmap (reverbDecayVal, 0.0f, 1.0f, 0.3f, 12.0f);
 
     // CARACTERE : axe structurel (cristallin -> sombre et moins dense), il pilote ENSEMBLE
@@ -1302,12 +1296,10 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float reverbSpread = juce::jlimit (0.0f, 1.0f, monoEngaged ? 0.0f : *apvts.getRawParameterValue ("width") * 0.5f);
 
     // Pre-diffusion : 4 allpass en serie, temps espaces sans rapports simples entre eux.
+    // Longueurs recalculees per-sample (dependent de la Taille) - voir la boucle du tank.
     static constexpr float fdnAllpassTimesMs[4] = { 5.3f, 8.9f, 13.1f, 17.9f };
     const float fdnAllpassCoeff = fdnDiffusion;
-
     float fdnAllpassSamples[4];
-    for (int i = 0; i < 4; ++i)
-        fdnAllpassSamples[i] = fdnAllpassTimesMs[i] * 0.001f * (float) currentSampleRate * fdnSizeFactor;
 
     // Tank a 2 bras croises (figure-8, lignee Lexicon/EMT/Dattorro) : chaque bras a
     // DEUX etages allpass+delay en serie (pas un seul) - premier passage : diffuse ->
@@ -1338,29 +1330,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     const float reverbBassMult = reverbBassDecaySmoothed.getNextValue();
     const float fdnBassCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * 350.0f / (float) currentSampleRate);
 
+    // Positions du tank + gains de reinjection : DECLAREES ici, remplies PER-SAMPLE dans la
+    // boucle du tank pour eviter les sauts de position aux frontieres de bloc quand Taille
+    // change (source du grésillement corrige le 17/07).
     float fdnTankAp1Samples[2], fdnTankDelay1Samples[2], fdnTankAp2Samples[2], fdnTankDelay2Samples[2],
           fdnTankFeedbackGain[2], fdnTankBassGain[2];
-    for (int a = 0; a < 2; ++a)
-    {
-        const float ap1Ms = fdnTankAp1TimesMs[a]    * fdnSizeFactor;
-        const float d1Ms  = fdnTankDelay1TimesMs[a] * fdnSizeFactor;
-        const float ap2Ms = fdnTankAp2TimesMs[a]    * fdnSizeFactor;
-        const float d2Ms  = fdnTankDelay2TimesMs[a] * fdnSizeFactor;
-
-        fdnTankAp1Samples[a]    = ap1Ms * 0.001f * (float) currentSampleRate;
-        fdnTankDelay1Samples[a] = d1Ms  * 0.001f * (float) currentSampleRate;
-        fdnTankAp2Samples[a]    = ap2Ms * 0.001f * (float) currentSampleRate;
-        fdnTankDelay2Samples[a] = d2Ms  * 0.001f * (float) currentSampleRate;
-
-        const float roundTripSeconds = (ap1Ms + d1Ms + ap2Ms + d2Ms) * 0.001f;
-        fdnTankFeedbackGain[a] = std::pow (10.0f, -3.0f * roundTripSeconds / fdnDecaySeconds);
-
-        // Gain propre a la bande grave. Le plafond a 0.995 n'est pas cosmetique : a Longueur
-        // 12 s le gain nominal vaut deja ~0.85, un multiplicateur de 2 le porterait a 1.7 et
-        // la bande grave partirait en emballement au lieu de decroitre. On borne donc juste
-        // sous 1 - le grave peut tenir tres longtemps, jamais grossir.
-        fdnTankBassGain[a] = juce::jmin (0.995f, fdnTankFeedbackGain[a] * reverbBassMult);
-    }
 
     // Positions de prise, en fraction de chaque ligne. Le canal 0 fixe la reference ; le
     // canal 1 s'en ecarte a mesure que Largeur monte (a 0 il lit aux memes positions, donc
@@ -1387,34 +1361,66 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // La Taille fixe l'equilibre de base : plus la piece est grande, plus la queue prend le
     // dessus sur les primaires - c'est ce qui rend le Taille reellement convaincant, sans
     // qu'on ait a toucher un bouton. Distance ne fait que DECALER ce comportement automatique.
-    const float sizeTailBias = juce::jmap (reverbSizeVal, 0.0f, 1.0f, 0.35f, 0.65f);
-    const float tailRatio = juce::jlimit (0.05f, 0.95f, sizeTailBias + (reverbDistanceVal - 0.5f) * 0.7f);
-
-    // Fondu a puissance constante : les primaires et la queue sont decorrelees, leurs energies
-    // s'additionnent. Un fondu lineaire creuserait un trou de niveau au milieu de la course.
-    const float erLevel   = std::cos (tailRatio * juce::MathConstants<float>::halfPi);
-    const float tailLevel = std::sin (tailRatio * juce::MathConstants<float>::halfPi);
-
+    // Les fondus (sizeTailBias, tailRatio, erLevel, tailLevel) et les positions des primaires
+    // (erSamples) sont recalcules per-sample dans la boucle (dependent de la Taille).
+    float erLevel = 1.0f, tailLevel = 0.0f;
     float erSamples[2][8];
-    for (int c = 0; c < 2; ++c)
-        for (int i = 0; i < 8; ++i)
-        {
-            // Largeur ecarte les temps d'arrivee du canal droit ; a 0 les deux canaux lisent
-            // le meme motif -> primaires strictement mono, comme le tank.
-            const float t = erTimesMs[0][i] + (erTimesMs[c][i] - erTimesMs[0][i]) * reverbSpread;
-            erSamples[c][i] = juce::jmax (1.0f, t * 0.001f * (float) currentSampleRate * fdnSizeFactor);
-        }
-
     float tapD1[2][2], tapD2[2][2];
-    for (int c = 0; c < 2; ++c)
+
+    // Cette lambda recalcule tout ce qui depend de la Taille. Appelee per-sample dans la
+    // boucle du tank. Coute quelques dizaines de flops + un pow + un cos/sin par appel,
+    // negligeable a 48 kHz sur du CPU moderne.
+    auto recomputeSizeDeps = [&] (float sizeVal)
+    {
+        const float sizeFactor = juce::jmap (sizeVal, 0.0f, 1.0f, 0.5f, 1.8f);
+
+        for (int i = 0; i < 4; ++i)
+            fdnAllpassSamples[i] = fdnAllpassTimesMs[i] * 0.001f * (float) currentSampleRate * sizeFactor;
+
         for (int a = 0; a < 2; ++a)
         {
-            const float f1 = tapFrac1[0][a] + (tapFrac1[c][a] - tapFrac1[0][a]) * reverbSpread;
-            const float f2 = tapFrac2[0][a] + (tapFrac2[c][a] - tapFrac2[0][a]) * reverbSpread;
-            tapD1[c][a] = juce::jmax (1.0f, fdnTankDelay1Samples[a] * f1);
-            tapD2[c][a] = juce::jmax (1.0f, fdnTankDelay2Samples[a] * f2);
+            const float ap1Ms = fdnTankAp1TimesMs[a]    * sizeFactor;
+            const float d1Ms  = fdnTankDelay1TimesMs[a] * sizeFactor;
+            const float ap2Ms = fdnTankAp2TimesMs[a]    * sizeFactor;
+            const float d2Ms  = fdnTankDelay2TimesMs[a] * sizeFactor;
+
+            fdnTankAp1Samples[a]    = ap1Ms * 0.001f * (float) currentSampleRate;
+            fdnTankDelay1Samples[a] = d1Ms  * 0.001f * (float) currentSampleRate;
+            fdnTankAp2Samples[a]    = ap2Ms * 0.001f * (float) currentSampleRate;
+            fdnTankDelay2Samples[a] = d2Ms  * 0.001f * (float) currentSampleRate;
+
+            const float roundTripSeconds = (ap1Ms + d1Ms + ap2Ms + d2Ms) * 0.001f;
+            fdnTankFeedbackGain[a] = std::pow (10.0f, -3.0f * roundTripSeconds / fdnDecaySeconds);
+            fdnTankBassGain[a] = juce::jmin (0.995f, fdnTankFeedbackGain[a] * reverbBassMult);
         }
 
+        // Reflexions primaires + fondu ER/tail (varient avec la Taille).
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < 8; ++i)
+            {
+                const float t = erTimesMs[0][i] + (erTimesMs[c][i] - erTimesMs[0][i]) * reverbSpread;
+                erSamples[c][i] = juce::jmax (1.0f, t * 0.001f * (float) currentSampleRate * sizeFactor);
+            }
+
+        const float sizeTailBias = juce::jmap (sizeVal, 0.0f, 1.0f, 0.35f, 0.65f);
+        const float tailRatio    = juce::jlimit (0.05f, 0.95f, sizeTailBias + (reverbDistanceVal - 0.5f) * 0.7f);
+        erLevel   = std::cos (tailRatio * juce::MathConstants<float>::halfPi);
+        tailLevel = std::sin (tailRatio * juce::MathConstants<float>::halfPi);
+
+        // Prises de sortie (fractions * longueur de ligne).
+        for (int c = 0; c < 2; ++c)
+            for (int a = 0; a < 2; ++a)
+            {
+                const float f1 = tapFrac1[0][a] + (tapFrac1[c][a] - tapFrac1[0][a]) * reverbSpread;
+                const float f2 = tapFrac2[0][a] + (tapFrac2[c][a] - tapFrac2[0][a]) * reverbSpread;
+                tapD1[c][a] = juce::jmax (1.0f, fdnTankDelay1Samples[a] * f1);
+                tapD2[c][a] = juce::jmax (1.0f, fdnTankDelay2Samples[a] * f2);
+            }
+    };
+
+    // Init : au cas ou quelque chose lirait ces valeurs avant la 1ere iteration de la boucle
+    // du tank (aujourd'hui rien ne le fait, mais autant etre defensif).
+    recomputeSizeDeps (reverbSizeElasticState);
 
     // Etages d'entree : Transient (adoucit l'attaque courte pour une reverbe plus
     // ambiante) -> Input HP/LP (evite l'engorgement grave/aigu dans le reservoir) ->
@@ -1462,6 +1468,12 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     for (int n = 0; n < numSamples; ++n)
     {
+        // TAILLE PER-SAMPLE : lissage Elastique + recompute des positions du tank a chaque
+        // sample. C'est ce qui elimine le grésillement percu en bougeant Taille - les positions
+        // glissent en continu (sub-sample) au lieu de sauter aux frontieres de bloc.
+        reverbSizeElasticState += (reverbSizeRawTarget - reverbSizeElasticState) * reverbSizeElasticCoeff;
+        recomputeSizeDeps (reverbSizeElasticState);
+
         // LFO de modulation du tank : une seule phase, 4 prises en quadrature pour que les
         // lignes ne bougent pas toutes ensemble (sinon elles resteraient correlees).
         reverbModPhase += reverbModRateHz / (float) currentSampleRate;
