@@ -1082,10 +1082,23 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         for (int ch = 0; ch < numChannels; ++ch)
         {
             auto* data = buffer.getWritePointer (ch);
-            // Preampli d'entree : sature le signal des l'entree, avant de le repartir vers
-            // le sec, l'echo et la reverbe - c'est l'etage analogique qui colore tout.
-            float inputSample = preampProcess (data[n], saturationAmt, saturationType,
-                                               saturationEmph, preampState[ch], currentSampleRate);
+
+            // ROUTING : deux entrees distinctes.
+            //   rawInput      = le signal entrant, PUR - c'est ce qui va a la sortie sur le
+            //                   chemin sec. A Mix 0, l'utilisateur entend LITTERALEMENT
+            //                   l'entree, quels que soient les reglages de caractere. Vrai
+            //                   bypass conceptuel.
+            //   coloredInput  = rawInput + toute la coloration d'entree (preampli, puis
+            //                   Debordement etage entree). C'est ce qui alimente la chaine
+            //                   temporelle (echo + reverbe) et rien d'autre.
+            // Le schema propose par l'utilisateur : le signal se scinde en deux chemins avant
+            // toute coloration. Le 100% dry va tel quel a la sortie ; le "dry sature" (colore)
+            // va au traitement temporel. Aucune coloration ne touche jamais le sec de sortie.
+            // Conforme au recadrage produit ("s'ouvre propre") et au lore (la machine peut
+            // servir juste de delay/reverbe si l'on veut, meme knobs de mod actifs).
+            const float rawInput = data[n];
+            float coloredInput = preampProcess (rawInput, saturationAmt, saturationType,
+                                                saturationEmph, preampState[ch], currentSampleRate);
 
             // Debordement d'ENTREE, juste apres le preampli et AVANT la repartition : il touche
             // donc le sec, l'echo et la reverbe. C'est le seul etage, avec le preampli, a
@@ -1106,9 +1119,9 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // Sans cet etage, le comportement etait a l'envers de l'intuition : on jouait fort,
             // le sec restait intact, et c'est un echo PLUS FAIBLE qui se dechirait plus tard.
             // La panne ne suivait pas le geste - d'ou un effet ressenti comme mecanique.
-            // ⚠️ Consequence assumee : a Mix 0 (sec seul), Debordement pousse abime quand meme
-            // la source. C'est un bouton "modde", il n'est pas cense etre sans danger.
-            inputSample = applyOverflow (inputSample, overflowAmt, overflowInput[ch]);
+            // Route sur le chemin COLORE seul (mise a jour 17/07) : a Mix 0 le sec sort brut,
+            // la coloration ne fait sens que si l'utilisateur veut du traitement temporel.
+            coloredInput = applyOverflow (coloredInput, overflowAmt, overflowInput[ch]);
 
             const float delayedSample = delayLine.popSample (ch, channelDelaySamples[ch]);
 
@@ -1144,7 +1157,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // reinjection le retranspose a chaque tour -> vraie montee facon shimmer.
             const float loopOut = intervalActive ? shifted : delayedSample;
 
-            float toPush = inputSample + loopOut * feedbackAmt;
+            float toPush = coloredInput + loopOut * feedbackAmt;
 
             // Reinjection croisee : la traine humide de la Reverbe (avec ~20ms de retard
             // fixe, cf. commentaire du membre) revient se faire attraper par le Moteur
@@ -1187,12 +1200,17 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // Le ducking ne touche QUE ce qu'on entend, jamais ce qui alimente la reverbe :
             // dryDelay reste intact, sinon on affamerait le moteur au lieu de baisser sa
             // traine - la queue se mettrait a pomper au rythme de la source.
-            float dryDelay = inputSample + delayWet;
+            // Alimente au signal COLORE : la reverbe fait partie du traitement temporel, elle
+            // recoit donc la source deja saturee/debordee. Le sec de sortie, lui, reste raw.
+            float dryDelay = coloredInput + delayWet;
             if (safetyOn)
                 dryDelay = softSafetyCeiling (dryDelay, 1.2f);
             dryDelayBuf.setSample (ch, n, dryDelay);
 
-            float directOut = inputSample * dryMixGain + delayWet * duckGain * wetMixGain;
+            // Sortie directe : le chemin sec est TOUJOURS le rawInput non colore. Coloration
+            // et effets ne s'entendent que via la portion humide (delayWet + reverb plus loin),
+            // ponderee par wetMixGain. A Mix 0 : sortie = rawInput * 1 + 0 = passthrough pur.
+            float directOut = rawInput * dryMixGain + delayWet * duckGain * wetMixGain;
             if (safetyOn)
                 directOut = softSafetyCeiling (directOut, 1.2f);
             directOutBuf.setSample (ch, n, directOut);
