@@ -1149,13 +1149,22 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             const float shifted = headA * std::sin (juce::MathConstants<float>::pi * pitchPhase[ch])
                                 + headB * std::sin (juce::MathConstants<float>::pi * phaseB);
 
-            // Sortie de boucle = le signal (eventuellement transpose). C'est LUI qu'on entend
-            // ET lui qu'on reinjecte - les deux doivent etre le meme, sinon le premier echo
-            // (le plus fort) resterait a la hauteur d'origine et la montee ne se construirait
-            // qu'a travers la reinjection : inaudible sans Reinjection poussee a fond. En
-            // tapant loopOut pour la sortie, l'echo est transpose des la 1re repetition, et la
-            // reinjection le retranspose a chaque tour -> vraie montee facon shimmer.
-            const float loopOut = intervalActive ? shifted : delayedSample;
+            // Sortie de boucle = le signal (eventuellement transpose) puis FILTRE. C'est LUI
+            // qu'on entend ET lui qu'on reinjecte - les deux doivent etre le meme, sinon le
+            // premier echo (le plus fort) resterait a la hauteur d'origine et la montee ne se
+            // construirait qu'a travers la reinjection : inaudible sans Reinjection poussee a
+            // fond.
+            const float loopRaw = intervalActive ? shifted : delayedSample;
+
+            // Filtre applique en LECTURE et non en ecriture (correction 17/07). L'accumulation
+            // est preservee : chaque cycle passe par le filtre une fois de plus, math identique
+            // a avant (audible_n = filter^n(X) * fb^(n-1)). Mais l'utilisateur entend le
+            // reglage COURANT immediatement, sans devoir attendre que la memoire "rattrape".
+            // Avant, le filtre etait applique sur toPush (ecriture) : les echantillons deja
+            // en memoire gardaient leur ancien spectre, seuls les nouveaux pushes portaient la
+            // nouvelle courbe. D'ou une latence perceptible de plusieurs tours de boucle.
+            float loopOut = delayHpFilter.processSample (ch, loopRaw);
+            loopOut = delayLpFilter.processSample (ch, loopOut);
 
             float toPush = coloredInput + loopOut * feedbackAmt;
 
@@ -1164,13 +1173,6 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // temps. A zero, chaine propre ; pousse, generateur ambiant qui s'auto-
             // entretient (delay et reverbe qui se parlent, facon Roland RE-201).
             toPush += crossFeedDelayLine.popSample (ch, crossFeedDelaySamples) * crossFeedAmt;
-
-            // Filtre DANS la boucle : applique a CHAQUE passage, donc les repetitions
-            // s'assombrissent progressivement (une bande perd des aigus a chaque tour).
-            // Sans lui, les echos revenaient a pleine bande et s'empilaient - le defaut qui
-            // rendait le delay dur sur une voix. Ouvert par defaut = neutre.
-            toPush = delayHpFilter.processSample (ch, toPush);
-            toPush = delayLpFilter.processSample (ch, toPush);
 
             // Integrite dans la boucle : dégrade ce qui entre dans la mémoire du delay,
             // pas le direct. Chaque passage réinjecte le résultat déjà dégradé, donc les
