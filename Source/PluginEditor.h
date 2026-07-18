@@ -125,6 +125,12 @@ private:
     juce::ToggleButton monoButton { "Mono" }, safetyButton { "Securite" };
     std::unique_ptr<ButtonAttachment> monoAttachment, safetyAttachment;
 
+    // Interrupteurs "Elastique" : un mod ajoute qui applique une inertie type moteur de bande
+    // aux knobs Temps (delay) et Taille (reverbe). Perces en facade a cote de leur knob cible ;
+    // habillage "morceau de ruban adhesif" prevu pour le skin, cf. project_digitape_ui_direction.
+    juce::ToggleButton delayElasticButton { "Elastique" }, reverbElasticButton { "Elastique" };
+    std::unique_ptr<ButtonAttachment> delayElasticAttachment, reverbElasticAttachment;
+
     // --- Capot (Advanced) ---
     KnobWithLabel driftRateKnob, driftDepthKnob, driftShapeKnob, widthKnob;    // Derive
     KnobWithLabel bitcrushAmountKnob, decimationAmountKnob;                    // Integrite

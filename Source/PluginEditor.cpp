@@ -239,6 +239,11 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     addAndMakeVisible (safetyButton);
     safetyAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "safety", safetyButton);
 
+    addAndMakeVisible (delayElasticButton);
+    delayElasticAttachment  = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "delayElastic",  delayElasticButton);
+    addAndMakeVisible (reverbElasticButton);
+    reverbElasticAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "reverbElastic", reverbElasticButton);
+
     // Capot
     setupKnob (driftRateKnob,          "driftRate",          "Derive freq");
     setupKnob (driftDepthKnob,         "driftDepth",         "Derive prof");
@@ -462,9 +467,17 @@ void DigitapeAudioProcessorEditor::resized()
         placeKnob (feedbackKnob,   knobs.removeFromLeft (w).reduced (4, 0));
         placeKnob (wetGainKnob,    knobs.removeFromLeft (w).reduced (4, 0));
         placeKnob (syncAmountKnob, knobs.removeFromLeft (w).reduced (4, 0));
-        z.removeFromTop (10);
+
+        // Interrupteur Elastique : perce sous le knob Temps (colonne 1). Prend 2 colonnes de
+        // large pour que le libelle "Elastique" tienne visuellement ; positionne "sous Temps"
+        // fonctionnellement. Le skin le remplacera par un ruban adhesif etroit + toggle style
+        // interrupteur DIY, ce qui recompactera visuellement.
+        auto elasticRow = z.removeFromTop (18);
+        delayElasticButton.setBounds (elasticRow.removeFromLeft (w * 2).reduced (4, 0));
+
+        z.removeFromTop (4);
         delayFilter->setBounds (z.removeFromTop (34));
-        z.removeFromTop (8);
+        z.removeFromTop (6);
         auto sync = z.removeFromTop (24);
         const int sw = sync.getWidth() / 2;
         syncNoteCombo.setBounds   (sync.removeFromLeft (sw).reduced (2, 0));
@@ -484,7 +497,13 @@ void DigitapeAudioProcessorEditor::resized()
         placeKnob (reverbDecayKnob,      knobs.removeFromLeft (w).reduced (3, 0));
         placeKnob (reverbModulationKnob, knobs.removeFromLeft (w).reduced (3, 0));
         placeKnob (reverbMixKnob,        knobs.removeFromLeft (w).reduced (3, 0));
-        z.removeFromTop (10);
+
+        // Interrupteur Elastique : perce sous le knob Taille (colonne 1). Meme logique que
+        // pour delay - largeur 2 colonnes pour le libelle, position visuellement sous Taille.
+        auto elasticRow = z.removeFromTop (18);
+        reverbElasticButton.setBounds (elasticRow.removeFromLeft (w * 2).reduced (3, 0));
+
+        z.removeFromTop (4);
         reverbFilter->setBounds (z.removeFromTop (34));
     }
 

@@ -136,7 +136,18 @@ private:
     float fdnTankBassState[2][2] {};
     juce::SmoothedValue<float> reverbBassDecaySmoothed;
 
-    juce::SmoothedValue<float> reverbSizeSmoothed, reverbDecaySmoothed, reverbCharacterSmoothed, reverbMixSmoothed;
+    juce::SmoothedValue<float> reverbDecaySmoothed, reverbCharacterSmoothed, reverbMixSmoothed;
+
+    // Elastique : one-pole manuel a coefficient switchable pour Temps (delay) et Taille
+    // (reverbe). Remplace SmoothedValue parce que reset() snappe la valeur courante a la
+    // cible, ce qui claquerait a chaque flip de l'interrupteur. Avec un one-pole manuel, le
+    // coefficient bouge sans discontinuite. Off : 20 ms (comportement d'origine, punchy).
+    // On  : 300 ms (glissement type moteur de bande). Etat = valeur courante lissee ;
+    // coefficient recalcule au bloc selon l'interrupteur correspondant.
+    float timeElasticState { 250.0f };
+    float timeElasticCoeff { 0.0f };
+    float reverbSizeElasticState { 0.5f };
+    float reverbSizeElasticCoeff { 0.0f };
 
     // Modulation du tank : un LFO lent unique, 4 prises decalees en phase, qui module
     // legerement les lignes longues et les diffuseurs -> casse les modes stationnaires
@@ -184,7 +195,7 @@ private:
     // l'emballement numerique, pas contre le niveau d'ecoute choisi).
     juce::SmoothedValue<float> outputGainSmoothed;
 
-    juce::SmoothedValue<float> timeSmoothed, feedbackSmoothed, mixSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed, integritySmoothed;
+    juce::SmoothedValue<float> feedbackSmoothed, mixSmoothed, driftRateSmoothed, driftDepthSmoothed, widthSmoothed, driftShapeSmoothed, integritySmoothed;
 
     // Preampli d'entree (saturation analogique) : seul etage volontairement analogique.
     // Drive + emphasis grave (facon Bus Force) ; le type de modele est lu au rythme du bloc.

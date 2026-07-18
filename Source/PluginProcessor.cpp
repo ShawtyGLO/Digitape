@@ -270,6 +270,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::NormalisableRange<float> (1.0f, 6000.0f, 0.01f, 0.3f), 250.0f,
         juce::AudioParameterFloatAttributes().withLabel ("ms")));
 
+    // ELASTIQUE (delay) — mod ajoute, off par defaut. Voir le commentaire dans processBlock
+    // pour le pourquoi et le comment. Un interrupteur separe par module (delay + reverbe)
+    // parce que la sensation qu'apporte l'inertie n'est pas la meme sur Temps (varispeed de
+    // bande) que sur Taille (piece qui respire) - l'utilisateur peut vouloir l'un sans l'autre.
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "delayElastic", 1 }, "Delay Elastique", false));
+
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "wetGain", 1 }, "Echo volume",
         juce::NormalisableRange<float> (0.0f, 1.5f, 0.001f), 1.0f,
@@ -295,6 +302,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.5f,
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
+
+    // ELASTIQUE (reverbe) — pareil que delayElastic mais pour Taille.
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "reverbElastic", 1 }, "Reverbe Elastique", false));
 
     // Longueur (RT60) : separee de la Taille. Avant, "Taille" pilotait en fait la
     // decroissance et rien ne changeait les dimensions du tank - d'ou l'impression qu'il
@@ -713,7 +724,14 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     crossFeedDelayLine.reset();
 
     const double smoothTime = 0.02;
-    timeSmoothed.reset (sampleRate, smoothTime);
+    // Elastique : init a la valeur courante du parametre (evite un slew de 0 vers la cible au
+    // premier bloc). Coefficient laisse a 0 - il sera calcule au premier bloc de processBlock
+    // selon l'etat des interrupteurs.
+    timeElasticState       = *apvts.getRawParameterValue ("time");
+    reverbSizeElasticState = *apvts.getRawParameterValue ("reverbSize");
+    timeElasticCoeff       = 0.0f;
+    reverbSizeElasticCoeff = 0.0f;
+
     feedbackSmoothed.reset (sampleRate, smoothTime);
     mixSmoothed.reset (sampleRate, smoothTime);
     driftRateSmoothed.reset (sampleRate, smoothTime);
@@ -731,7 +749,6 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     decimationAmountSmoothed.reset (sampleRate, smoothTime);
     wetGainSmoothed.reset (sampleRate, smoothTime);
     syncAmountSmoothed.reset (sampleRate, smoothTime);
-    reverbSizeSmoothed.reset (sampleRate, smoothTime);
     reverbDecaySmoothed.reset (sampleRate, smoothTime);
     reverbCharacterSmoothed.reset (sampleRate, smoothTime);
     reverbMixSmoothed.reset (sampleRate, smoothTime);
@@ -748,7 +765,6 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     crossFeedbackSmoothed.reset (sampleRate, smoothTime);
     outputGainSmoothed.reset (sampleRate, smoothTime);
 
-    timeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("time"));
     feedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("feedback"));
     mixSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("mix"));
     driftRateSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("driftRate"));
@@ -766,7 +782,6 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     decimationAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("wetGain"));
     syncAmountSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("syncAmount"));
-    reverbSizeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbSize"));
     reverbDecaySmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbDecay"));
     reverbCharacterSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbCharacter"));
     reverbMixSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbMix"));
@@ -880,7 +895,16 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // Les sliders ne changent que la valeur cible de l'APVTS : sans ces lignes,
     // les SmoothedValue restent figes sur l'etat du tout premier prepareToPlay
     // et ignorent tout ce que l'utilisateur regle ensuite dans l'interface.
-    timeSmoothed.setTargetValue       (*apvts.getRawParameterValue ("time"));
+    // Elastique : coefficient recalcule au bloc selon l'etat de l'interrupteur. Passer de
+    // 20 ms a 300 ms change seulement le coefficient, pas la valeur - donc pas de discontinuite
+    // au flip. Sensation nette : off = punchy (comportement d'origine), on = glissement moteur.
+    const bool delayElastic  = *apvts.getRawParameterValue ("delayElastic")  > 0.5f;
+    const bool reverbElastic = *apvts.getRawParameterValue ("reverbElastic") > 0.5f;
+    const float timeElasticTime       = delayElastic  ? 0.30f : 0.02f;
+    const float reverbSizeElasticTime = reverbElastic ? 0.30f : 0.02f;
+    timeElasticCoeff       = 1.0f - std::exp (-1.0f / (timeElasticTime       * (float) currentSampleRate));
+    reverbSizeElasticCoeff = 1.0f - std::exp (-1.0f / (reverbSizeElasticTime * (float) currentSampleRate));
+
     feedbackSmoothed.setTargetValue   (*apvts.getRawParameterValue ("feedback"));
     mixSmoothed.setTargetValue        (*apvts.getRawParameterValue ("mix"));
     driftRateSmoothed.setTargetValue  (*apvts.getRawParameterValue ("driftRate"));
@@ -922,8 +946,17 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     decimationAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("decimationAmount"));
     wetGainSmoothed.setTargetValue (*apvts.getRawParameterValue ("wetGain"));
     syncAmountSmoothed.setTargetValue (*apvts.getRawParameterValue ("syncAmount"));
-    reverbSizeSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbSize"));
     reverbDecaySmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbDecay"));
+
+    // Taille : smoother manuel Elastique. Le glissement est per-bloc (le tank recalcule ses
+    // longueurs une fois par bloc), donc on avance le coefficient au prorata du numSamples pour
+    // que la constante de temps reelle (300 ms en Elastique) ne depende pas de la taille de
+    // bloc de l'hote. Formule : 1 - (1-coeffPerSample)^numSamples.
+    {
+        const float coeffBlock = 1.0f - std::pow (1.0f - reverbSizeElasticCoeff, (float) numSamples);
+        const float target     = *apvts.getRawParameterValue ("reverbSize");
+        reverbSizeElasticState += (target - reverbSizeElasticState) * coeffBlock;
+    }
     reverbCharacterSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbCharacter"));
     reverbMixSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbMix"));
     reverbModulationSmoothed.setTargetValue (*apvts.getRawParameterValue ("reverbModulation"));
@@ -972,7 +1005,12 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
 
     for (int n = 0; n < numSamples; ++n)
     {
-        const float timeMs      = timeSmoothed.getNextValue();
+        // Temps : smoother Elastique manuel. Off = ~20 ms, on = ~300 ms. Lisse per-sample
+        // parce que le temps de delay est lu per-sample - le glissement du knob doit sonner
+        // continu et pas par escaliers de bloc.
+        const float timeTarget  = *apvts.getRawParameterValue ("time");
+        timeElasticState += (timeTarget - timeElasticState) * timeElasticCoeff;
+        const float timeMs      = timeElasticState;
         const float feedbackAmt = feedbackSmoothed.getNextValue();
         const float globalMix   = mixSmoothed.getNextValue();   // Dry/Wet GLOBAL du plugin
         // Fondu a PUISSANCE CONSTANTE (loi cos/sin) et non lineaire. Le sec et l'humide sont
@@ -1222,7 +1260,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // --- Reverbe : reseau a retards rebouclés maison (FDN, cf. section tank plus bas) ---
     // Alimentee par le sec+echo (dryDelayBuf). Taille pilote la decroissance, Caractere
     // l'amortissement par ligne.
-    const float reverbSizeVal   = reverbSizeSmoothed.getNextValue();
+    const float reverbSizeVal   = reverbSizeElasticState;
     const float reverbDecayVal  = reverbDecaySmoothed.getNextValue();
     const float reverbCharVal   = reverbCharacterSmoothed.getNextValue();
     const float reverbMixVal    = reverbMixSmoothed.getNextValue();
