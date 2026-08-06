@@ -328,9 +328,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
+    // Pre-delai defaut 25 ms plutot que 0 : sans un peu d'ecart source/reverbe, la queue
+    // colle au sec et on perd toute impression d'espace. 25 ms est le minimum syndical
+    // d'une reverbe pro (ecart type d'une pente entre les murs et la voix).
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "reverbPreDelay", 1 }, "Reverbe predelai",
-        juce::NormalisableRange<float> (0.0f, 150.0f, 0.01f), 0.0f,
+        juce::NormalisableRange<float> (0.0f, 150.0f, 0.01f), 25.0f,
         juce::AudioParameterFloatAttributes().withLabel ("ms")));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -1305,9 +1308,20 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // diffusion apporte le changement de densite sans jamais casser la queue.
     // Le "casse/glitche" extreme du concept est le travail de l'Integrite (le module de
     // corruption), pas du coeur de la reverbe, qui doit rester musical sur toute sa course.
-    const float fdnDampCutoffHz = juce::jmap (reverbCharVal, 0.0f, 1.0f, 16000.0f, 1500.0f);
+    // Plage etendue (refonte 07/2025) : Caractere a fond sonnait encore "lisse". On tire
+    // damping de 20 kHz a 1 kHz (au lieu de 16k -> 1.5k) et diffusion de 0.85 a 0.45.
+    // Reste borne a 0.45 en bas pour ne pas re-declencher les saccades des allpass.
+    const float fdnDampCutoffHz = juce::jmap (reverbCharVal, 0.0f, 1.0f, 20000.0f, 1000.0f);
     const float fdnDampCoeff = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * fdnDampCutoffHz / (float) currentSampleRate);
-    const float fdnDiffusion = juce::jmap (reverbCharVal, 0.0f, 1.0f, 0.78f, 0.45f);
+    const float fdnDiffusion = juce::jmap (reverbCharVal, 0.0f, 1.0f, 0.85f, 0.45f);
+
+    // Saturation dans le tank : drive tres doux, augmente avec Caractere. C'est ce qui
+    // apporte la chaleur et le "corps" qui manquait a un FDN purement lineaire. Applique
+    // sur le signal APRES amortissement, avant la reinjection - tanh normalise a gain unite
+    // en petit signal (comme le preampli), donc pas de perte de niveau a bas drive et
+    // compression douce des cretes. A Caractere sombre le drive monte : queue plus "brulee",
+    // plus vintage. A Caractere cristallin : quasi transparent, tres subtile chaleur.
+    const float fdnTankSatDrive = 1.05f + reverbCharVal * 0.4f;   // 1.05 (cristallin) a 1.45 (sombre)
 
     // ECART STEREO par PRISES DIFFERENTES, et non par desaccord des lignes. La version
     // precedente allongeait les lignes d'un canal et raccourcissait celles de l'autre (+-5%) :
@@ -1334,8 +1348,12 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     static constexpr float fdnTankDelay1TimesMs[2] = { 118.6f, 105.1f };
     static constexpr float fdnTankAp2TimesMs[2]    = { 61.3f, 74.9f };
     static constexpr float fdnTankDelay2TimesMs[2] = { 89.7f, 71.3f };
+    // Diffusion PROGRESSIVE : etage 2 diffuse PLUS que l'etage 1 (au lieu de moins comme
+    // avant). Dans une vraie piece, les premieres arrivees sont sparses et la queue
+    // devient de plus en plus dense - on suit ce comportement en montant la diffusion au
+    // fil du tour. Cap a 0.9 pour rester stable.
     const float fdnTankAp1Coeff = fdnDiffusion;
-    const float fdnTankAp2Coeff = fdnDiffusion * 0.75f;
+    const float fdnTankAp2Coeff = juce::jmin (0.9f, fdnDiffusion * 1.15f);
 
     // Modulation du tank : un LFO lent, profondeur sub-milliseconde (plage classique facon
     // Dattorro/Lexicon). Assez pour desaccorder les modes stationnaires sans donner un chorus
@@ -1568,6 +1586,13 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 const float bass = fdnTankBassState[a][ch];
                 fed1[a] = bass * fdnTankBassGain[a] + (damped - bass) * fdnTankFeedbackGain[a];
 
+                // Saturation subtile dans la boucle. tanh(x*d)/d -> x en petit signal
+                // (chaleur discrete quand ca joue doux) et compresse les cretes (le tank
+                // ne peut plus s'emballer, la queue prend du corps quand ca joue fort).
+                // C'est ce qui manquait pour que la reverbe sonne "espace" plutot que
+                // "algorithme lineaire".
+                fed1[a] = std::tanh (fed1[a] * fdnTankSatDrive) / fdnTankSatDrive;
+
                 raw2[a] = fdnTankDelay2[a].popSample (ch, juce::jmax (1.0f, fdnTankDelay2Samples[a]));
             }
 
@@ -1596,10 +1621,11 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 fdnTankDelay1[a].pushSample (ch, diffused1);
             }
 
-            // Sortie = les 4 prises (positions propres au canal), et non plus les lectures de
-            // la boucle : c'est ce qui porte desormais l'image stereo. Meme makeup (+6 dB) et
-            // meme nombre de termes qu'avant, donc le niveau ne bouge pas.
-            const float tail = 0.5f * tapOut;
+            // Sortie = les 4 prises (positions propres au canal). Makeup rehausse a 0.85
+            // (etait 0.5) : la reverbe restait plus faible que les repetitions du delay meme
+            // a Volume max, c'est corrige. La saturation dans le tank sert aussi de safety net
+            // contre l'emballement de ce boost.
+            const float tail = 0.85f * tapOut;
 
             // Primaires + queue, fondu a puissance constante pilote par Taille et Distance.
             data[n] = erOut * erLevel + tail * tailLevel;
