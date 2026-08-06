@@ -131,6 +131,12 @@ private:
     juce::ToggleButton delayElasticButton { "Elastique" }, reverbElasticButton { "Elastique" };
     std::unique_ptr<ButtonAttachment> delayElasticAttachment, reverbElasticAttachment;
 
+    // Interrupteur on/off dedie a l'Intervalle. Le knob seul ne suffit pas : engager le
+    // transpositeur en croisant 0 produit des clics inevitables (deux tetes de lecture qui
+    // demarrent). Avec ce switch, on regle la valeur voulue puis on engage proprement.
+    juce::ToggleButton intervalOnButton { "on" };
+    std::unique_ptr<ButtonAttachment> intervalOnAttachment;
+
     // --- Capot (Advanced) ---
     KnobWithLabel driftRateKnob, driftDepthKnob, driftShapeKnob, widthKnob;    // Derive
     KnobWithLabel bitcrushAmountKnob, decimationAmountKnob;                    // Integrite

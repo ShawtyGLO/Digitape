@@ -243,6 +243,8 @@ DigitapeAudioProcessorEditor::DigitapeAudioProcessorEditor (DigitapeAudioProcess
     delayElasticAttachment  = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "delayElastic",  delayElasticButton);
     addAndMakeVisible (reverbElasticButton);
     reverbElasticAttachment = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "reverbElastic", reverbElasticButton);
+    addAndMakeVisible (intervalOnButton);
+    intervalOnAttachment   = std::make_unique<ButtonAttachment> (audioProcessor.apvts, "intervalOn",   intervalOnButton);
 
     // Capot
     setupKnob (driftRateKnob,          "driftRate",          "Derive freq");
@@ -531,6 +533,12 @@ void DigitapeAudioProcessorEditor::resized()
         placeKnob (integrityKnob,  r2.removeFromLeft (w).reduced (4, 0));
         placeKnob (overflowKnob,   r2.removeFromLeft (w).reduced (4, 0));
         placeKnob (reactivityKnob, r2.removeFromLeft (w).reduced (4, 0));
-        placeKnob (intervalKnob,   r2.removeFromLeft (w).reduced (4, 0));
+        auto intervalCol = r2.removeFromLeft (w).reduced (4, 0);
+        placeKnob (intervalKnob, intervalCol);
+        // Petit switch on/off sous le knob Intervalle : evite les artefacts au demarrage du
+        // pitch shifter en live/automation. Reglable a l'avance, engage proprement (fondu 50 ms).
+        intervalOnButton.setBounds (intervalCol.getX() + 4,
+                                    intervalCol.getBottom() - 14,
+                                    intervalCol.getWidth() - 8, 14);
     }
 }

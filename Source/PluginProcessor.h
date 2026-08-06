@@ -116,6 +116,10 @@ private:
     float pitchPhase[2] { 0.0f, 0.0f };
     juce::SmoothedValue<float> intervalSmoothed;
 
+    // Fondu 50 ms entre delayedSample (off) et shifted (on) au flip du switch Intervalle.
+    // Evite les clics/artefacts au moment d'engager le pitch shifter en live/automation.
+    juce::SmoothedValue<float> intervalFadeSmoothed;
+
     // Reseau a retards rebouclés maison, remplace juce::dsp::Reverb. Pre-diffusion :
     // 4 allpass Schroeder en serie. Tank façon Lexicon/EMT/Dattorro (lignee des refs
     // hardware du concept) : boucle croisee a 2 bras en figure-8, CHAQUE bras avec DEUX

@@ -378,6 +378,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("dt").withStringFromValueFunction (
             [] (float v, int) { return (v > 0.0f ? "+" : "") + juce::String (v, 1); })));
 
+    // Interrupteur Intervalle : necessaire pour l'automation et le jeu live. Sans lui, il
+    // fallait CROISER 0 avec la valeur du knob pour engager le module, et le transpositeur
+    // (deux tetes en fondu) produisait des artefacts au demarrage - inutilisable en direct.
+    // Avec ce switch, on regle la valeur du knob a l'avance et on engage/desengage proprement
+    // avec un fondu de 50 ms (voir intervalFadeSmoothed).
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "intervalOn", 1 }, "Intervalle actif", false));
+
     // DEBORDEMENT — le knob "modde", celui que le constructeur n'avait pas prevu.
     // PAS une saturation : une saturation analogique PLIE (genou progressif), un nombre ne plie
     // pas. Un mot numerique monte jusqu'a sa valeur maximale et soit l'additionneur sature (le
@@ -762,6 +770,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbDistanceSmoothed.reset (sampleRate, smoothTime);
     overflowSmoothed.reset (sampleRate, smoothTime);
     intervalSmoothed.reset (sampleRate, smoothTime);
+    intervalFadeSmoothed.reset (sampleRate, 0.05);   // 50 ms de fondu on/off
     crossFeedbackSmoothed.reset (sampleRate, smoothTime);
     outputGainSmoothed.reset (sampleRate, smoothTime);
 
@@ -795,6 +804,7 @@ void DigitapeAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     reverbDistanceSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("reverbDistance"));
     overflowSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("overflow"));
     intervalSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("interval"));
+    intervalFadeSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("intervalOn") > 0.5f ? 1.0f : 0.0f);
     crossFeedbackSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("crossFeedback"));
     outputGainSmoothed.setCurrentAndTargetValue (*apvts.getRawParameterValue ("outputGain"));
 
@@ -928,6 +938,7 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     // (raw param ci-dessous) repondait, les etages entree+boucle etaient geles a 0.
     overflowSmoothed.setTargetValue (*apvts.getRawParameterValue ("overflow"));
     intervalSmoothed.setTargetValue (*apvts.getRawParameterValue ("interval"));
+    intervalFadeSmoothed.setTargetValue (*apvts.getRawParameterValue ("intervalOn") > 0.5f ? 1.0f : 0.0f);
     const float overflowBusAmt = *apvts.getRawParameterValue ("overflow");
     delayHighpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("delayHighpass"));
     delayLowpassSmoothed.setTargetValue (*apvts.getRawParameterValue ("delayLowpass"));
@@ -1033,7 +1044,12 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
         // "optionnel" : ce serait un knob de plus, on verra si le besoin se fait sentir).
         const float intervalSemis = magnetizeInterval (intervalSmoothed.getNextValue(), 0.7f);
         const float intervalRatio = std::pow (2.0f, intervalSemis / 12.0f);
-        const bool  intervalActive = std::abs (intervalSemis) > 0.01f;
+        // Fondu on/off explicite. L'ancienne detection "|semis| > 0.01" derivait l'activation
+        // de la valeur du knob - il fallait CROISER 0 pour engager, ce qui donnait des clics
+        // en live/automation (le transpositeur produit des artefacts au demarrage). Desormais
+        // le switch commande, et un fondu 50 ms crossfade proprement entre l'echo brut et le
+        // signal transpose. Le knob peut se regler a l'avance sans rien engager.
+        const float intervalFade = intervalFadeSmoothed.getNextValue();
         const float syncAmt      = syncAmountSmoothed.getNextValue();
 
         // Reactivite interne : suit l'enveloppe (mono, pic) de l'ENTREE brute et pousse
@@ -1186,7 +1202,14 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
             // premier echo (le plus fort) resterait a la hauteur d'origine et la montee ne se
             // construirait qu'a travers la reinjection : inaudible sans Reinjection poussee a
             // fond.
-            const float loopRaw = intervalActive ? shifted : delayedSample;
+            // Crossfade a puissance constante entre echo brut et shifté selon intervalFade
+            // (0 = off, 1 = on, 50 ms de rampe au flip du switch). Puissance constante parce
+            // que les deux signaux sont correles (memes crete d'attaque) : un fondu lineaire
+            // creuserait au milieu de la rampe. cos/sin garde le niveau plat pendant la
+            // transition, donc pas de "creux" audible au flip.
+            const float fadeIn  = std::sin (intervalFade * juce::MathConstants<float>::halfPi);
+            const float fadeOut = std::cos (intervalFade * juce::MathConstants<float>::halfPi);
+            const float loopRaw = delayedSample * fadeOut + shifted * fadeIn;
 
             // Filtre applique en LECTURE et non en ecriture (correction 17/07). L'accumulation
             // est preservee : chaque cycle passe par le filtre une fois de plus, math identique
