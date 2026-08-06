@@ -328,12 +328,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout DigitapeAudioProcessor::crea
         juce::AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction (
             [] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)); })));
 
-    // Pre-delai defaut 25 ms plutot que 0 : sans un peu d'ecart source/reverbe, la queue
-    // colle au sec et on perd toute impression d'espace. 25 ms est le minimum syndical
-    // d'une reverbe pro (ecart type d'une pente entre les murs et la voix).
+    // Pre-delai defaut 14 ms plutot que 0 : sans un peu d'ecart source/reverbe, la queue
+    // colle au sec et on perd toute impression d'espace. La plage 0-150 ms reste intacte
+    // (0 = pas d'ecart, toujours atteignable), seul le point d'ouverture change.
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "reverbPreDelay", 1 }, "Reverbe predelai",
-        juce::NormalisableRange<float> (0.0f, 150.0f, 0.01f), 25.0f,
+        juce::NormalisableRange<float> (0.0f, 150.0f, 0.01f), 14.0f,
         juce::AudioParameterFloatAttributes().withLabel ("ms")));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -1591,7 +1591,10 @@ void DigitapeAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
                 // ne peut plus s'emballer, la queue prend du corps quand ca joue fort).
                 // C'est ce qui manquait pour que la reverbe sonne "espace" plutot que
                 // "algorithme lineaire".
-                fed1[a] = std::tanh (fed1[a] * fdnTankSatDrive) / fdnTankSatDrive;
+                // TEMP DESACTIVEE - utilisateur veut isoler les autres changements (makeup,
+                // diffusion progressive, plage caractere) sans la chaleur ajoutee par la sat.
+                // A reactiver apres retour d'ecoute.
+                // fed1[a] = std::tanh (fed1[a] * fdnTankSatDrive) / fdnTankSatDrive;
 
                 raw2[a] = fdnTankDelay2[a].popSample (ch, juce::jmax (1.0f, fdnTankDelay2Samples[a]));
             }
