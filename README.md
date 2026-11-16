@@ -4,8 +4,12 @@ Instrument temps / hauteur / texture en C++ / JUCE : varispeed, delay et réverb
 
 ## L'idée
 
-Pas un clone. L'ADN d'une lignée matérielle — Lexicon 224, AMS RMX16, Publison, Eventide —
-retraduit en mécanismes numériques natifs, au lieu d'être imité machine par machine.
+L'ADN d'un Space Echo avec le grain digital des réverbes typées des années 90, comme Lexicon 224, AMS RMX16, Publison, Eventide, etc.
+Je voulais donner du grain digital à la réverbe, pouvoir m'amuser avec le delay et la réverbe comme on joue avec l'unité physique de Roland.
+
+J'ai pu affiner l'idée que les limitations de la tape, comme la saturation, l'usure et autres, soient retranscrites en limitations digitales comme la quantification, le bitcrush, etc.
+
+Le feedback est très intéressant et la possibilité de delay entre une mesure calée au tempo du projet ainsi que du temps libre rend les possibilités de sonorités très intéressantes et expérimentales.
 
 ## Construire
 
