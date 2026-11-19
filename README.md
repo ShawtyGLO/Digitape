@@ -11,6 +11,12 @@ J'ai pu affiner l'idée que les limitations de la tape, comme la saturation, l'u
 
 Le feedback est très intéressant et la possibilité de delay entre une mesure calée au tempo du projet ainsi que du temps libre rend les possibilités de sonorités très intéressantes et expérimentales.
 
+## Validation
+
+Prototype Python dans `_proto/` : bancs de mesure et rendus de comparaison avant le portage en
+C++. Les sessions FL Studio de test sont versionnées avec le projet, pour que chaque comparaison
+reparte du même matériel.
+
 ## Construire
 
 Ouvrir `Digitape.jucer` dans Projucer, puis compiler sous Visual Studio 2022.
